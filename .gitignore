@@ -1,0 +1,4 @@
+job_apply_agent/
+__pycache__/
+*.pyc
+.env
