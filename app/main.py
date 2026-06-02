@@ -1,29 +1,22 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from app.routers import jobs
+from app.api.routes import health
 
-load_dotenv()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup: runs before the server starts accepting requests
+    print("Job Hunter API starting up")
+    yield
+    # shutdown: runs when the server is stopping
+    print("Job Hunter API shutting down")
+
 
 app = FastAPI(
-    title="Job Agent API",
-    description="Automated job hunting assistant",
-    version="0.2.0"
+    title="Job Hunter API",
+    version="0.1.0",
+    description="Scrapes jobs, rewrites resumes with an LLM, delivers a daily digest.",
+    lifespan=lifespan,
 )
 
-app.include_router(jobs.router)
-
-
-class HealthResponse(BaseModel):
-    status: str
-    version: str
-
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    return HealthResponse(status="ok", version="0.2.0")
-
-
-@app.get("/")
-async def root():
-    return {"message": "Visit /docs to explore the API"}
+app.include_router(health.router, prefix="/api/v1")
