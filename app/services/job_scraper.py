@@ -10,6 +10,9 @@ from app.models.schemas import Job
 
 logger = logging.getLogger(__name__)
 
+'''NOTE: Indeed RSS blocks non-US IPs. Returns 0 results in production.
+Kept as a demonstration of multi-source architecture.
+Replace with Remotive or JSearch API for a second live source.'''
 
 def _parse_indeed(query: str, limit: int) -> list[Job]:
     url = f"https://www.indeed.com/rss?q={query.replace(' ', '+')}&sort=date"
