@@ -1,5 +1,6 @@
 import os
 
+os.environ.setdefault("GROQ_API_KEY", "test-key")
 os.environ.setdefault("ADZUNA_APP_ID", "test")
 os.environ.setdefault("ADZUNA_API_KEY", "test")
 os.environ.setdefault("GOOGLE_RESUME_DOC_ID", "test_doc_id")

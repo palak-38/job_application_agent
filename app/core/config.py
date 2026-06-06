@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    groq_api_key: str | None = None
+    groq_api_key: str 
     adzuna_app_id: str
     adzuna_api_key: str
     google_resume_doc_id: str                    # now required
