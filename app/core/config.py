@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     google_resume_doc_id: str                    # now required
     service_account_file: str = "service_account.json"
     sender_email: str | None = None
-    gmail_app_password: str | None = None
+    gmail_app_password: str 
     recipient_email: str | None = None
     job_query: str = "software engineer"
     jobs_per_run: int = 5
