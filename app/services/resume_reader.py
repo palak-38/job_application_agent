@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def read_resume_as_text() -> str:
-    services = build_google_services(settings.service_account_file)
+    services = build_google_services(r"C:\Users\hp\Desktop\work\job_application_agent\service_account.json")
     drive = services["drive"]
 
     request = drive.files().export_media(

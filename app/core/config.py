@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     adzuna_api_key: str
     google_resume_doc_id: str                    # now required
     service_account_file: str = "service_account.json"
-    sender_email: str | None = None
+    sender_email: str 
     gmail_app_password: str 
-    recipient_email: str | None = None
+    recipient_email: str 
     job_query: str = "software engineer"
     jobs_per_run: int = 5
 

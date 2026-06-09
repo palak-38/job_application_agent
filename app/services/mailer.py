@@ -12,18 +12,20 @@ logger = logging.getLogger(__name__)
 
 def send_summary_email(results: list[RewrittenResume]) -> None:
     rows = "".join(
-        f"""<tr>
-            <td style='padding:8px;border:1px solid #ddd'>{r.job.company}</td>
-            <td style='padding:8px;border:1px solid #ddd'>{r.job.title}</td>
-            <td style='padding:8px;border:1px solid #ddd'>
-                <a href='{r.job.url}'>Apply</a>
-            </td>
-            <td style='padding:8px;border:1px solid #ddd'>
-                <a href='{r.doc_url}'>Resume</a>
-            </td>
-        </tr>"""
-        for r in results
-    )
+    f"""<tr>
+        <td style='padding:8px;border:1px solid #ddd'>{r.job.company}</td>
+        <td style='padding:8px;border:1px solid #ddd'>{r.job.title}</td>
+        <td style='padding:8px;border:1px solid #ddd'>
+            <a href='{r.job.url}'>Apply</a>
+        </td>
+    </tr>
+    <tr>
+        <td colspan='3' style='padding:12px;border:1px solid #ddd'>
+            <pre style='white-space:pre-wrap;font-family:Arial'>{r.resume_text}</pre>
+        </td>
+    </tr>"""
+    for r in results
+)
 
     html = f"""
     <html>
