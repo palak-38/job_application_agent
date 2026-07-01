@@ -13,9 +13,7 @@ class Job(BaseModel):
 class RewrittenResume(BaseModel):
     job: Job
     resume_text: str
-    doc_url: HttpUrl | None = None
 
 class RunResponse(BaseModel):
     status: str
     jobs_processed: int
-    results: list[RewrittenResume]
