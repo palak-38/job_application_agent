@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     recipient_email: str 
     job_query: str = "software engineer"
     jobs_per_run: int = 5
-
+    google_output_folder_id: str 
     model_config = ConfigDict(extra="forbid", env_file=str(_ENV_FILE))
 
 
