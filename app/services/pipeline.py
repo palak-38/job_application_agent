@@ -1,3 +1,4 @@
+from app.core.store import mark_seen
 from app.models.schemas import RewrittenResume
 from app.services.job_scraper import get_jobs
 from app.services.resume_reader import read_resume_as_text
@@ -25,4 +26,8 @@ async def run_private_pipeline() -> int:
         attachments.append(create_resume_pdf(rewritten_resume, job))
 
     send_summary_email(results, attachments)
+
+    # Mark seen only after a successful send so a failed run never
+    # permanently skips a posting.
+    mark_seen(jobs)
     return len(results)
