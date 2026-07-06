@@ -30,6 +30,22 @@ def test_create_resume_pdf_returns_pdf_bytes():
     assert pdf_bytes.startswith(b"%PDF")
 
 
+def test_create_resume_pdf_handles_multiline_text():
+    """Real resumes are many lines. Rendering line-by-line with fpdf2's
+    default multi_cell positioning crashes on the second line ('Not enough
+    horizontal space') because new_x=RIGHT parks the cursor at the right
+    margin — this reproduces the first live-run failure."""
+    text = "\n".join(
+        ["Palak Sood", "", "EXPERIENCE"]
+        + [f"- Bullet point number {i} with some detail text" for i in range(30)]
+    )
+
+    pdf_bytes = create_resume_pdf(text, make_test_job())
+
+    assert isinstance(pdf_bytes, bytes)
+    assert pdf_bytes.startswith(b"%PDF")
+
+
 def test_create_resume_pdf_handles_unicode_punctuation():
     """LLM-rewritten resume text commonly contains em dashes, curly quotes,
     bullets, and ellipses, which the core Helvetica font can't encode and
