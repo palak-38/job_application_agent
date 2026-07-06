@@ -13,7 +13,15 @@ Rules you must follow without exception:
 - Every bullet point must start with an action verb.
 - Preserve all real experience, education, and skills from the original.
 - Return ONLY the rewritten resume text. No preamble, no commentary, \
-no explanations, no markdown fences."""
+no explanations, no markdown fences.
+
+Output format (the text is rendered to PDF, so follow it exactly):
+- First line: the candidate's full name, alone.
+- Second line: contact details on one line, if present in the original.
+- Section headers in ALL CAPS on their own line (e.g. SUMMARY, EXPERIENCE, \
+SKILLS, EDUCATION, PROJECTS), with one blank line before each.
+- Bullet points start with "- ".
+- Plain text only: no markdown symbols (#, *, _), no tables, no columns."""
 
 
 async def rewrite_resume_for_job(resume_text: str, job: Job) -> str:

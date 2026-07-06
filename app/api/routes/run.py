@@ -18,7 +18,8 @@ async def run_pipeline(request: RunRequest = RunRequest()):
         counts = await run_private_pipeline(
             role=role, location=request.location, threshold=request.threshold
         )
-        return RunResponse(status="email_sent", **counts.model_dump())
+        status = "email_sent" if counts.jobs_scored else "no_new_jobs"
+        return RunResponse(status=status, **counts.model_dump())
     except Exception as e:
         logger.exception("Pipeline failed")
         raise HTTPException(status_code=500, detail=str(e))

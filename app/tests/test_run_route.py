@@ -52,6 +52,18 @@ def test_run_threads_caller_threshold_through(mock_pipeline):
     )
 
 
+@patch("app.api.routes.run.run_private_pipeline", new_callable=AsyncMock)
+def test_run_reports_no_new_jobs_status(mock_pipeline):
+    mock_pipeline.return_value = RunCounts(
+        jobs_scored=0, jobs_matched=0, jobs_skipped=0
+    )
+
+    resp = client.post("/api/v1/run", json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "no_new_jobs"
+
+
 def test_run_rejects_invalid_role():
     resp = client.post("/api/v1/run", json={"role": "not_a_real_role"})
 

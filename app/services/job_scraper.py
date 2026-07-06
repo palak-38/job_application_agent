@@ -139,5 +139,9 @@ async def get_jobs(
     deduped = _deduplicate(combined, limit=len(combined))
     unseen = filter_unseen(deduped)
     result = unseen[: settings.jobs_per_run]
-    logger.info(f"Pipeline will process {len(result)} new job(s)")
+    logger.info(
+        f"Fetched {len(combined)} job(s): {len(deduped)} unique, "
+        f"{len(deduped) - len(unseen)} already seen in a previous run, "
+        f"{len(result)} new to process"
+    )
     return result

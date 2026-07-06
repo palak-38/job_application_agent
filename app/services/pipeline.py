@@ -22,6 +22,9 @@ async def run_private_pipeline(
         threshold if threshold is not None else settings.score_threshold
     )
     jobs = await get_jobs(role=role, location=location)
+    if not jobs:
+        logger.info("No new jobs to process — skipping scoring and digest email")
+        return RunCounts(jobs_scored=0, jobs_matched=0, jobs_skipped=0)
 
     # Scoring gate (F5): every job gets a cheap score+reason call; only jobs
     # at or above the threshold proceed to the expensive rewrite. Jobs whose
