@@ -40,9 +40,11 @@ def create_resume_pdf(resume_text: str, job: Job) -> bytes:
     pdf.add_page()
     pdf.set_font("Helvetica", size=11)
 
+    # One multi_cell call for the whole text: it handles embedded newlines
+    # itself. Calling it per line is a trap — its default new_x=RIGHT parks
+    # the cursor at the right margin, so a second call has zero width left.
     safe_text = _to_latin1_safe(resume_text)
-    for line in safe_text.splitlines() or [""]:
-        pdf.multi_cell(0, 6, line)
+    pdf.multi_cell(0, 6, safe_text)
 
     logger.info(f"Rendered resume PDF for {job.company} — {job.title}")
     return bytes(pdf.output())

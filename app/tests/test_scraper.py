@@ -1,9 +1,15 @@
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.models.schemas import Job, Role
-from app.services.job_scraper import ROLE_QUERY_MAP, _deduplicate, get_jobs
+from app.services.job_scraper import (
+    ROLE_QUERY_MAP,
+    _deduplicate,
+    _redact_secrets,
+    get_jobs,
+)
 
 
 def make_job(title: str, company: str, n: int = 1) -> Job:
@@ -74,6 +80,48 @@ async def test_get_jobs_filters_seen_before_truncating():
         result = await get_jobs(role=Role.BACKEND_SWE)
 
     assert [j.title for j in result] == ["Role 5"]
+
+
+def test_redact_secrets_strips_adzuna_credentials():
+    message = (
+        "Client error '401 Unauthorized' for url 'https://api.adzuna.com/v1/"
+        "api/jobs/in/search/1?app_id=abc123&app_key=deadbeef99&what=AI+engineer'"
+    )
+    redacted = _redact_secrets(message)
+    assert "abc123" not in redacted
+    assert "deadbeef99" not in redacted
+    assert "app_id=***" in redacted and "app_key=***" in redacted
+    assert "what=AI+engineer" in redacted  # non-secret params survive
+
+
+@pytest.mark.asyncio
+async def test_adzuna_failure_logged_without_secrets(caplog):
+    """httpx exception messages embed the full request URL, which carries
+    the Adzuna credentials as query params — the error log must not."""
+    error = Exception(
+        "error for url 'https://api.adzuna.com/...?app_id=abc123&app_key=deadbeef99'"
+    )
+    with patch(
+        "app.services.job_scraper._fetch_adzuna", new_callable=AsyncMock,
+        side_effect=error,
+    ), patch(
+        "app.services.job_scraper._parse_indeed", return_value=[]
+    ), patch(
+        "app.services.job_scraper.filter_unseen", side_effect=lambda jobs: jobs
+    ), caplog.at_level(logging.ERROR):
+        result = await get_jobs(role=Role.ML_AI_ENGINEER)
+
+    assert result == []
+    assert "Adzuna fetch failed" in caplog.text
+    assert "deadbeef99" not in caplog.text and "abc123" not in caplog.text
+
+
+def test_httpx_request_logging_is_silenced():
+    """httpx logs full request URLs at INFO (query-param secrets included);
+    app startup must raise its logger to WARNING."""
+    import app.main  # noqa: F401  (importing applies the logging config)
+
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
 
 
 def test_dedup_respects_limit():

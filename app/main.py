@@ -4,7 +4,12 @@ from fastapi import FastAPI
 from app.api.routes import health, jobs, run
 
 
-logging.basicConfig(level=logging.INFO)  
+logging.basicConfig(level=logging.INFO)
+
+# httpx logs every request URL at INFO, and Adzuna authenticates via query
+# params — so its app_id/app_key would land in the console/log output.
+# Warnings and errors still come through.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
