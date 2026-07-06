@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 import feedparser
@@ -20,6 +21,12 @@ ROLE_QUERY_MAP: dict[Role, str] = {
     Role.DATA_SCIENCE: "data scientist",
     Role.BACKEND_SWE: "backend engineer",
 }
+
+def _redact_secrets(message: str) -> str:
+    """Adzuna authenticates via query params, and httpx exception messages
+    include the full request URL — strip the credentials before logging."""
+    return re.sub(r"(app_id|app_key)=[^&\s'\"]+", r"\1=***", message)
+
 
 def _parse_indeed(query: str, limit: int) -> list[Job]:
     url = f"https://www.indeed.com/rss?q={query.replace(' ', '+')}&sort=date"
@@ -123,7 +130,7 @@ async def get_jobs(
         combined.extend(indeed_jobs)
 
     if isinstance(adzuna_jobs, Exception):
-        logger.error(f"Adzuna fetch failed: {adzuna_jobs}")
+        logger.error(f"Adzuna fetch failed: {_redact_secrets(str(adzuna_jobs))}")
     else:
         combined.extend(adzuna_jobs)
 
