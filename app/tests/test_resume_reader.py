@@ -1,4 +1,6 @@
 from unittest.mock import MagicMock, patch
+
+from app.models.schemas import Role
 from app.services.resume_reader import read_resume_as_text
 
 
@@ -14,7 +16,7 @@ def test_read_resume_returns_correct_text():
     with patch("app.services.resume_reader.build_google_services") as mock_build, \
          patch("app.services.resume_reader.MediaIoBaseDownload", side_effect=fake_media_download):
         mock_build.return_value = {"drive": MagicMock()}
-        result = read_resume_as_text()
+        result = read_resume_as_text(Role.ML_AI_ENGINEER)
 
     assert result == fake_resume
 
@@ -31,7 +33,7 @@ def test_read_resume_returns_non_empty_string():
     with patch("app.services.resume_reader.build_google_services") as mock_build, \
          patch("app.services.resume_reader.MediaIoBaseDownload", side_effect=fake_media_download):
         mock_build.return_value = {"drive": MagicMock()}
-        result = read_resume_as_text()
+        result = read_resume_as_text(Role.ML_AI_ENGINEER)
 
     assert isinstance(result, str)
     assert len(result) > 0

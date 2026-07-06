@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     gmail_app_password: str
     recipient_email: str
     default_role: Role = Role.ML_AI_ENGINEER
+    score_threshold: float = 6.0        # scoring gate default; RunRequest.threshold overrides per run
+    # Per-role resume Google Doc ids (D1: profile-ready). Empty = every role
+    # uses google_resume_doc_id. Set as JSON, e.g.
+    # ROLE_RESUME_DOC_IDS={"data_science": "<doc-id>"}
+    role_resume_doc_ids: dict[Role, str] = {}
     jobs_per_run: int = 5
     sqlite_db_path: str = "seen_jobs.db"
     model_config = ConfigDict(extra="forbid", env_file=str(_ENV_FILE))

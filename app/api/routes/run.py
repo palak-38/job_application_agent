@@ -15,8 +15,10 @@ async def run_pipeline(request: RunRequest = RunRequest()):
     logger.info(f"Run requested: caller_role={request.role}, effective_role={role.value}")
 
     try:
-        count = await run_private_pipeline(role=role, location=request.location)
-        return RunResponse(status="email_sent", jobs_processed=count)
+        counts = await run_private_pipeline(
+            role=role, location=request.location, threshold=request.threshold
+        )
+        return RunResponse(status="email_sent", **counts.model_dump())
     except Exception as e:
         logger.exception("Pipeline failed")
         raise HTTPException(status_code=500, detail=str(e))
