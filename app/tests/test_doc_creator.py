@@ -22,6 +22,18 @@ def test_create_resume_pdf_returns_pdf_bytes():
     assert pdf_bytes.startswith(b"%PDF")
 
 
+def test_create_resume_pdf_handles_unicode_punctuation():
+    """LLM-rewritten resume text commonly contains em dashes, curly quotes,
+    bullets, and ellipses, which the core Helvetica font can't encode and
+    would otherwise crash rendering (FPDFUnicodeEncodingException)."""
+    text = "Built a service — used Python, FastAPI • deployed with Docker … “smart quotes” and ‘these’"
+
+    pdf_bytes = create_resume_pdf(text, make_test_job())
+
+    assert isinstance(pdf_bytes, bytes)
+    assert pdf_bytes.startswith(b"%PDF")
+
+
 def test_send_email_attaches_pdf():
     results = [
         RewrittenResume(
