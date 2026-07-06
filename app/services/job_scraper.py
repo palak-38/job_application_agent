@@ -6,6 +6,7 @@ import feedparser
 import httpx
 
 from app.core.config import settings
+from app.core.store import filter_unseen
 from app.models.schemas import Job
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ async def get_jobs() -> list[Job]:
     else:
         combined.extend(adzuna_jobs)
 
-    result = _deduplicate(combined, settings.jobs_per_run)
-    logger.info(f"Pipeline will process {len(result)} unique jobs")
+    unique = _deduplicate(combined, settings.jobs_per_run)
+    result = filter_unseen(unique)
+    logger.info(f"Pipeline will process {len(result)} new job(s)")
     return result

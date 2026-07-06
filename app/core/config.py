@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     recipient_email: str 
     job_query: str = "software engineer"
     jobs_per_run: int = 5
+    sqlite_db_path: str = "seen_jobs.db"
     model_config = ConfigDict(extra="forbid", env_file=str(_ENV_FILE))
 
 

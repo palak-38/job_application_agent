@@ -4,3 +4,4 @@ __pycache__/
 .env
 future_work.md
 service_account.json
+*.db
