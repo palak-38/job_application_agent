@@ -50,6 +50,32 @@ async def test_get_jobs_threads_role_into_query():
         assert mock_indeed.call_args.args[0] == expected_query
 
 
+@pytest.mark.asyncio
+async def test_get_jobs_filters_seen_before_truncating():
+    """A job beyond the jobs_per_run cutoff must still surface if the jobs
+    ahead of it in the raw fetch order are all already-seen (F3 + F2 combined:
+    truncation must not happen before dedup, or a run can silently return 0
+    new jobs while unseen postings exist further down the list)."""
+    jobs = [make_job(f"Role {i}", f"Company {i}", i) for i in range(6)]
+    seen_urls = {str(j.url) for j in jobs[:5]}
+
+    with patch(
+        "app.services.job_scraper._fetch_adzuna", new_callable=AsyncMock
+    ) as mock_adzuna, patch(
+        "app.services.job_scraper._parse_indeed", return_value=jobs
+    ), patch(
+        "app.services.job_scraper.filter_unseen",
+        side_effect=lambda js: [j for j in js if str(j.url) not in seen_urls],
+    ), patch(
+        "app.services.job_scraper.settings.jobs_per_run", 5
+    ):
+        mock_adzuna.return_value = []
+
+        result = await get_jobs(role=Role.BACKEND_SWE)
+
+    assert [j.title for j in result] == ["Role 5"]
+
+
 def test_dedup_respects_limit():
     jobs = [make_job(f"Role {i}", f"Company {i}", i) for i in range(5)]
     result = _deduplicate(jobs, limit=3)

@@ -127,7 +127,10 @@ async def get_jobs(
     else:
         combined.extend(adzuna_jobs)
 
-    unique = _deduplicate(combined, settings.jobs_per_run)
-    result = filter_unseen(unique)
+    # Filter out already-seen jobs before capping to jobs_per_run, so a run
+    # doesn't get truncated down to postings that turn out to all be stale.
+    deduped = _deduplicate(combined, limit=len(combined))
+    unseen = filter_unseen(deduped)
+    result = unseen[: settings.jobs_per_run]
     logger.info(f"Pipeline will process {len(result)} new job(s)")
     return result
