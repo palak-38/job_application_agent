@@ -52,6 +52,18 @@ def patch_pipeline(stack: ExitStack, jobs: list[Job], scores: list[JobScore]):
 
 
 @pytest.mark.asyncio
+async def test_no_new_jobs_sends_no_email_and_scores_nothing():
+    with ExitStack() as stack:
+        mocks = patch_pipeline(stack, jobs=[], scores=[])
+        counts = await run_private_pipeline(role=Role.ML_AI_ENGINEER)
+
+    assert counts.jobs_scored == 0
+    mocks["score_job"].assert_not_awaited()
+    mocks["send_email"].assert_not_called()
+    mocks["mark_seen"].assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_gate_rewrites_only_jobs_at_or_above_threshold():
     jobs = [make_job(1), make_job(2), make_job(3)]
     scores = [

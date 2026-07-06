@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from app.models.schemas import Job, ScoredJob
-from app.services.doc_creator import create_resume_pdf
+from app.services.doc_creator import _is_section_header, create_resume_pdf
 from app.services.mailer import send_summary_email
 
 
@@ -56,6 +56,16 @@ def test_create_resume_pdf_handles_unicode_punctuation():
 
     assert isinstance(pdf_bytes, bytes)
     assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_section_header_detection():
+    assert _is_section_header("EXPERIENCE")
+    assert _is_section_header("TECHNICAL SKILLS")
+    assert not _is_section_header("Palak Sood")                     # mixed case
+    assert not _is_section_header("- Built APIs with FastAPI")      # bullet
+    assert not _is_section_header("2021 - 2023")                    # no letters
+    assert not _is_section_header("A" * 41)                        # too long
+    assert not _is_section_header("")
 
 
 def test_send_email_attaches_pdf_only_for_matched_jobs():
