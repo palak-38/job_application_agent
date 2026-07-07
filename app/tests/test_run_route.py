@@ -73,3 +73,36 @@ def test_run_rejects_invalid_role():
 def test_run_rejects_out_of_range_threshold():
     assert client.post("/api/v1/run", json={"threshold": 15}).status_code == 422
     assert client.post("/api/v1/run", json={"threshold": -1}).status_code == 422
+
+
+@patch("app.api.routes.run.run_private_pipeline", new_callable=AsyncMock)
+def test_run_requires_api_key_when_token_configured(mock_pipeline):
+    mock_pipeline.return_value = COUNTS
+
+    with patch("app.api.routes.run.settings.run_token", "s3cret"):
+        assert client.post("/api/v1/run", json={}).status_code == 401
+        assert (
+            client.post(
+                "/api/v1/run", json={}, headers={"X-API-Key": "wrong"}
+            ).status_code
+            == 401
+        )
+        resp = client.post("/api/v1/run", json={}, headers={"X-API-Key": "s3cret"})
+
+    assert resp.status_code == 200
+    mock_pipeline.assert_awaited_once()
+
+
+@patch("app.api.routes.run.run_private_pipeline", new_callable=AsyncMock)
+def test_run_stays_open_when_no_token_configured(mock_pipeline):
+    mock_pipeline.return_value = COUNTS
+
+    with patch("app.api.routes.run.settings.run_token", None):
+        resp = client.post("/api/v1/run", json={})
+
+    assert resp.status_code == 200
+
+
+def test_health_stays_public_regardless_of_token():
+    with patch("app.api.routes.run.settings.run_token", "s3cret"):
+        assert client.get("/api/v1/health").status_code == 200

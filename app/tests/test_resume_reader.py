@@ -13,9 +13,8 @@ def test_read_resume_returns_correct_text():
         mock_downloader.next_chunk.return_value = (None, True)
         return mock_downloader
 
-    with patch("app.services.resume_reader.build_google_services") as mock_build, \
+    with patch("app.services.resume_reader.build_drive_service", return_value=MagicMock()), \
          patch("app.services.resume_reader.MediaIoBaseDownload", side_effect=fake_media_download):
-        mock_build.return_value = {"drive": MagicMock()}
         result = read_resume_as_text(Role.ML_AI_ENGINEER)
 
     assert result == fake_resume
@@ -30,9 +29,8 @@ def test_read_resume_returns_non_empty_string():
         mock_downloader.next_chunk.return_value = (None, True)
         return mock_downloader
 
-    with patch("app.services.resume_reader.build_google_services") as mock_build, \
+    with patch("app.services.resume_reader.build_drive_service", return_value=MagicMock()), \
          patch("app.services.resume_reader.MediaIoBaseDownload", side_effect=fake_media_download):
-        mock_build.return_value = {"drive": MagicMock()}
         result = read_resume_as_text(Role.ML_AI_ENGINEER)
 
     assert isinstance(result, str)
