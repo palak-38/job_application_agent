@@ -1,9 +1,16 @@
-"""Persistent, cross-run deduplication backed by SQLite (stdlib, no new dep).
+"""Persistent, cross-run deduplication.
 
 A job is identified by its URL. `filter_unseen` drops jobs recorded in a prior
 run; `mark_seen` records them. Jobs are marked seen only after they have been
 successfully delivered (see pipeline), so a failed run never permanently skips a
 posting, and a second run the same day processes zero already-seen jobs.
+
+Two backends behind one connection function, same SQL for both (Turso speaks
+the SQLite dialect):
+- local (default): stdlib sqlite3 file — zero setup for dev and tests.
+- production: Turso hosted libSQL, used when TURSO_DATABASE_URL is set —
+  free-tier hosts have ephemeral filesystems, so a local DB file would be
+  wiped on every restart and the daily digest would re-send the same jobs.
 """
 
 import logging
@@ -24,10 +31,31 @@ CREATE TABLE IF NOT EXISTS seen_jobs (
 )
 """
 
+_backend_logged = False
+
+
+def _log_backend_once(backend: str) -> None:
+    global _backend_logged
+    if not _backend_logged:
+        logger.info(f"Dedup store backend: {backend}")
+        _backend_logged = True
+
 
 @contextmanager
 def _connect(db_path: str | None = None):
-    conn = sqlite3.connect(db_path or settings.sqlite_db_path)
+    # An explicit db_path (tests) always means local sqlite.
+    if db_path is None and settings.turso_database_url:
+        import libsql  # lazy: only production needs the dependency
+
+        _log_backend_once("turso")
+        conn = libsql.connect(
+            settings.turso_database_url,
+            auth_token=settings.turso_auth_token or "",
+        )
+    else:
+        _log_backend_once("sqlite (local file)")
+        conn = sqlite3.connect(db_path or settings.sqlite_db_path)
+
     try:
         conn.execute(_SCHEMA)
         yield conn
@@ -38,19 +66,22 @@ def _connect(db_path: str | None = None):
 
 def filter_unseen(jobs: list[Job], db_path: str | None = None) -> list[Job]:
     """Return only jobs whose URL was not recorded in a prior run."""
-    with _connect(db_path) as conn:
-        unseen = [
-            job
-            for job in jobs
-            if conn.execute(
-                "SELECT 1 FROM seen_jobs WHERE url = ?", (str(job.url),)
-            ).fetchone()
-            is None
-        ]
+    if not jobs:
+        return []
 
-    skipped = len(jobs) - len(unseen)
-    if skipped:
-        logger.info(f"Dedup: skipped {skipped} already-seen job(s)")
+    urls = [str(job.url) for job in jobs]
+    placeholders = ",".join("?" * len(urls))
+    # One query for all URLs: with a hosted backend every statement is a
+    # network round-trip, so per-job SELECTs would be N+1 over the wire.
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT url FROM seen_jobs WHERE url IN ({placeholders})", urls
+        ).fetchall()
+
+    seen = {row[0] for row in rows}
+    unseen = [job for job in jobs if str(job.url) not in seen]
+    if seen:
+        logger.info(f"Dedup: skipped {len(seen)} already-seen job(s)")
     return unseen
 
 

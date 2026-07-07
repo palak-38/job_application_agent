@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     adzuna_api_key: str
     google_resume_doc_id: str                    # now required
     service_account_file: str = "service_account.json"
+    # Deployed hosts have no service_account.json file: paste the JSON
+    # content itself into this env var instead. Takes precedence over the
+    # file when set.
+    google_service_account_json: str | None = None
+    # Hosted dedup DB (Turso). Unset -> local sqlite file (dev/tests).
+    turso_database_url: str | None = None
+    turso_auth_token: str | None = None
+    # When set, POST /run requires a matching X-API-Key header.
+    run_token: str | None = None
     sender_email: str
     gmail_app_password: str
     recipient_email: str

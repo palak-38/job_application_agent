@@ -4,7 +4,7 @@ import logging
 from googleapiclient.http import MediaIoBaseDownload
 
 from app.core.config import settings
-from app.integrations.google_client import build_google_services
+from app.integrations.google_client import build_drive_service
 from app.models.schemas import Role
 
 logger = logging.getLogger(__name__)
@@ -17,8 +17,7 @@ def read_resume_as_text(role: Role) -> str:
     profile = "per-role" if role in settings.role_resume_doc_ids else "master"
     logger.info(f"Loading {profile} resume for role={role.value}")
 
-    services = build_google_services(settings.service_account_file)
-    drive = services["drive"]
+    drive = build_drive_service()
 
     request = drive.files().export_media(
         fileId=doc_id,
