@@ -1,0 +1,51 @@
+# Stage 3 scheduler: GitHub Actions cron hitting POST /run on the deployed
+# service (brief §8: not in-process APScheduler — this doubles as CI/CD
+# evidence and lets the free Render instance sleep between runs).
+#
+# Requires two repo secrets: APP_URL (Render URL, no trailing slash) and
+# RUN_TOKEN (matches the service's RUN_TOKEN env var).
+#
+# A failed step fails the workflow, and GitHub emails on workflow failure —
+# that is the (free) alerting for unattended runs.
+name: Daily digest
+
+on:
+  schedule:
+    - cron: "30 1 * * *"   # ~07:00 IST
+    - cron: "30 13 * * *"  # ~19:00 IST
+  workflow_dispatch: {}     # manual trigger for testing
+
+jobs:
+  trigger-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the free instance (cold start can take ~60s)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          for attempt in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$APP_URL/api/v1/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "Service is up (attempt $attempt)"
+              exit 0
+            fi
+            echo "Health returned '${code}'; retrying in 15s (attempt $attempt/10)"
+            sleep 15
+          done
+          echo "Service failed to wake up" >&2
+          exit 1
+
+      - name: Trigger the pipeline (default role, server-side threshold)
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          RUN_TOKEN: ${{ secrets.RUN_TOKEN }}
+        run: |
+          # Empty body -> settings.default_role and settings.score_threshold
+          # decide server-side (F1: scheduled runs use the configured default).
+          # --fail-with-body: non-2xx fails this step -> workflow failure email.
+          response=$(curl -s --fail-with-body --max-time 300 \
+            -X POST "$APP_URL/api/v1/run" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $RUN_TOKEN" \
+            -d '{}')
+          echo "Run result: $response"
