@@ -134,6 +134,52 @@ def test_digest_shows_scores_and_visibly_skipped_section():
     assert "Frontend-heavy role" in html
 
 
+def test_digest_uses_resend_api_when_key_configured():
+    """Render's free tier blocks outbound SMTP entirely, so deployed
+    instances must send via the Resend HTTPS API instead."""
+    scored = [
+        ScoredJob(
+            job=make_test_job(1, "Acme Corp"),
+            score=8,
+            reason="Strong fit",
+            resume_text="Rewritten resume",
+        )
+    ]
+    attachments = [b"%PDF fake"]
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"id": "email_123"}
+    with patch("app.services.mailer.settings.resend_api_key", "re_test_key"), patch(
+        "app.services.mailer.httpx.post", return_value=mock_response
+    ) as mock_post, patch("app.services.mailer.smtplib.SMTP_SSL") as mock_smtp:
+        send_summary_email(scored, attachments, threshold=6.0)
+
+    mock_smtp.assert_not_called()  # no SMTP attempt when the API path is on
+    mock_post.assert_called_once()
+    assert mock_post.call_args.args[0] == "https://api.resend.com/emails"
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["subject"].startswith("Job Hunter — 1 matched / 1 scored")
+    assert payload["attachments"][0]["filename"] == "resume_Acme_Corp.pdf"
+    assert "Strong fit" in payload["html"]
+    auth_header = mock_post.call_args.kwargs["headers"]["Authorization"]
+    assert auth_header == "Bearer re_test_key"
+    mock_response.raise_for_status.assert_called_once()
+
+
+def test_digest_falls_back_to_smtp_when_no_resend_key():
+    scored = [
+        ScoredJob(job=make_test_job(1, "Acme Corp"), score=2, reason="weak")
+    ]
+
+    with patch("app.services.mailer.settings.resend_api_key", None), patch(
+        "app.services.mailer.httpx.post"
+    ) as mock_post:
+        mock_server = send_with_mock_smtp(scored, attachments=[])
+
+    mock_post.assert_not_called()
+    mock_server.send_message.assert_called_once()
+
+
 def test_digest_with_no_matches_still_sends_with_skipped_jobs():
     scored = [
         ScoredJob(

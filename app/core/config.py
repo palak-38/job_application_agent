@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     turso_auth_token: str | None = None
     # When set, POST /run requires a matching X-API-Key header.
     run_token: str | None = None
+    # When set, the digest goes out via the Resend HTTPS API instead of
+    # Gmail SMTP (Render's free tier blocks all outbound SMTP ports).
+    # Without a verified custom domain Resend only delivers to the account
+    # owner's own address — which is exactly what this digest does.
+    resend_api_key: str | None = None
+    resend_from: str = "Job Hunter <onboarding@resend.dev>"
     sender_email: str
     gmail_app_password: str
     recipient_email: str
