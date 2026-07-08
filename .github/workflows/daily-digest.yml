@@ -42,10 +42,16 @@ jobs:
         run: |
           # Empty body -> settings.default_role and settings.score_threshold
           # decide server-side (F1: scheduled runs use the configured default).
-          # --fail-with-body: non-2xx fails this step -> workflow failure email.
-          response=$(curl -s --fail-with-body --max-time 300 \
+          # Status and body are always printed BEFORE deciding pass/fail, so
+          # a failed run is diagnosable straight from this log.
+          http_code=$(curl -s -o response.json -w "%{http_code}" --max-time 300 \
             -X POST "$APP_URL/api/v1/run" \
             -H "Content-Type: application/json" \
             -H "X-API-Key: $RUN_TOKEN" \
-            -d '{}')
-          echo "Run result: $response"
+            -d '{}') || { echo "curl failed (network/timeout)"; exit 1; }
+          echo "HTTP $http_code"
+          cat response.json; echo
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Run failed" >&2
+            exit 1
+          fi
