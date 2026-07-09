@@ -1,5 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.core.config import settings
 from app.services.rewriter import rewrite_resume_for_job
 from app.models.schemas import Job
 
@@ -63,5 +65,5 @@ async def test_rewriter_passes_correct_model():
         await rewrite_resume_for_job("Original resume text", make_test_job())
 
     call_kwargs = create_mock.call_args.kwargs
-    assert call_kwargs["model"] == "llama-3.3-70b-versatile"
+    assert call_kwargs["model"] == settings.groq_model  # configurable, not hardcoded
     assert call_kwargs["temperature"] == 0.3

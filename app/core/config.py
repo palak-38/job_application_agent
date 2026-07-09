@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     gmail_app_password: str
     recipient_email: str
     default_role: Role = Role.ML_AI_ENGINEER
+    # Groq model for scoring + rewriting. Swappable via env var without a
+    # deploy (llama-3.3-70b was deprecated by Groq mid-project).
+    groq_model: str = "moonshotai/kimi-k2"
     score_threshold: float = 6.0        # scoring gate default; RunRequest.threshold overrides per run
     # Per-role resume Google Doc ids (D1: profile-ready). Empty = every role
     # uses google_resume_doc_id. Set as JSON, e.g.
