@@ -1,10 +1,12 @@
-from contextlib import ExitStack
+﻿from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models.schemas import Job, JobScore, Role
+from app.models.schemas import Job, JobScore, ResumeDoc, Role
 from app.services.pipeline import run_private_pipeline
+
+FAKE_DOC = ResumeDoc(name="Palak Sood", sections=[])
 
 
 def make_job(n: int) -> Job:
@@ -36,9 +38,12 @@ def patch_pipeline(
             patch("app.services.pipeline.read_resume_as_text",
                   return_value="MASTER RESUME")
         ),
-        "rewrite": stack.enter_context(
-            patch("app.services.pipeline.rewrite_resume_for_job",
-                  new_callable=AsyncMock, return_value="tailored resume")
+        "parse_resume": stack.enter_context(
+            patch("app.services.pipeline.parse_resume", return_value=FAKE_DOC)
+        ),
+        "tailor": stack.enter_context(
+            patch("app.services.pipeline.tailor_resume",
+                  new_callable=AsyncMock, return_value=(FAKE_DOC, True))
         ),
         "create_pdf": stack.enter_context(
             patch("app.services.pipeline.create_resume_pdf",
@@ -85,8 +90,8 @@ async def test_gate_rewrites_only_jobs_at_or_above_threshold():
     assert counts.jobs_scored == 3
     assert counts.jobs_matched == 2
     assert counts.jobs_skipped == 1
-    assert mocks["rewrite"].await_count == 2
-    rewritten_jobs = [c.args[1] for c in mocks["rewrite"].await_args_list]
+    assert mocks["tailor"].await_count == 2
+    rewritten_jobs = [c.args[1] for c in mocks["tailor"].await_args_list]
     assert [j.title for j in rewritten_jobs] == ["Job 1", "Job 3"]
 
     # The digest gets ALL scored jobs with their matched roles, and
@@ -168,7 +173,7 @@ async def test_unscored_job_fails_open_without_rewrite():
 
     assert counts.jobs_matched == 0
     assert counts.jobs_skipped == 1
-    mocks["rewrite"].assert_not_awaited()
+    mocks["tailor"].assert_not_awaited()
     scored_arg = mocks["send_email"].call_args.args[0]
     assert scored_arg[0].score is None
     assert scored_arg[0].resume_text is None
@@ -201,6 +206,7 @@ async def test_resume_not_read_when_nothing_matches():
 
     assert counts.jobs_matched == 0
     mocks["read_resume"].assert_not_called()
-    mocks["rewrite"].assert_not_awaited()
+    mocks["tailor"].assert_not_awaited()
     # The digest still goes out so skipped jobs are visible.
     mocks["send_email"].assert_called_once()
+

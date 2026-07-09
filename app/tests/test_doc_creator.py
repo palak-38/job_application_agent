@@ -1,8 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 from app.models.schemas import Job, Role, ScoredJob
-from app.services.doc_creator import _is_section_header, create_resume_pdf
+from app.services.doc_creator import create_resume_pdf
 from app.services.mailer import send_summary_email
+from app.services.resume_parser import parse_resume
 
 
 def make_test_job(n: int = 1, company: str = "Acme Corp") -> Job:
@@ -23,49 +24,51 @@ def send_with_mock_smtp(scored, attachments, threshold=6.0):
     return mock_server
 
 
+def make_test_doc(extra_bullets: int = 2):
+    text = "\n".join(
+        [
+            "Palak Sood",
+            "mail@example.com | github.com/palak-38",
+            "",
+            "EXPERIENCE",
+            "Intern | Acme Corp | Jun 2025 - Aug 2025",
+        ]
+        + [f"- Bullet point number {i} with some detail text" for i in range(extra_bullets)]
+        + ["", "TECHNICAL SKILLS", "Python, FastAPI, SQLite"]
+    )
+    return parse_resume(text)
+
+
 def test_create_resume_pdf_returns_pdf_bytes():
-    pdf_bytes = create_resume_pdf("Resume text here", make_test_job())
+    pdf_bytes = create_resume_pdf(make_test_doc(), make_test_job())
 
     assert isinstance(pdf_bytes, bytes)
     assert pdf_bytes.startswith(b"%PDF")
 
 
-def test_create_resume_pdf_handles_multiline_text():
-    """Real resumes are many lines. Rendering line-by-line with fpdf2's
-    default multi_cell positioning crashes on the second line ('Not enough
-    horizontal space') because new_x=RIGHT parks the cursor at the right
-    margin — this reproduces the first live-run failure."""
-    text = "\n".join(
-        ["Palak Sood", "", "EXPERIENCE"]
-        + [f"- Bullet point number {i} with some detail text" for i in range(30)]
-    )
-
-    pdf_bytes = create_resume_pdf(text, make_test_job())
+def test_create_resume_pdf_handles_long_multipage_resume():
+    """Many bullets must flow across pages without fpdf2 positioning crashes
+    ('Not enough horizontal space' — the first live-run failure class)."""
+    pdf_bytes = create_resume_pdf(make_test_doc(extra_bullets=80), make_test_job())
 
     assert isinstance(pdf_bytes, bytes)
     assert pdf_bytes.startswith(b"%PDF")
 
 
 def test_create_resume_pdf_handles_unicode_punctuation():
-    """LLM-rewritten resume text commonly contains em dashes, curly quotes,
-    bullets, and ellipses, which the core Helvetica font can't encode and
-    would otherwise crash rendering (FPDFUnicodeEncodingException)."""
-    text = "Built a service — used Python, FastAPI • deployed with Docker … “smart quotes” and ‘these’"
+    """LLM-edited text commonly contains em dashes, curly quotes, bullets,
+    and ellipses, which the core Helvetica font can't encode and would
+    otherwise crash rendering (FPDFUnicodeEncodingException)."""
+    doc = make_test_doc()
+    doc.sections[0].entries[0].bullets.append(
+        "Built a service — used Python • Docker … “smart quotes” and ‘these’"
+    )
+    doc.contact = "mail@example.com — GitHub"
 
-    pdf_bytes = create_resume_pdf(text, make_test_job())
+    pdf_bytes = create_resume_pdf(doc, make_test_job())
 
     assert isinstance(pdf_bytes, bytes)
     assert pdf_bytes.startswith(b"%PDF")
-
-
-def test_section_header_detection():
-    assert _is_section_header("EXPERIENCE")
-    assert _is_section_header("TECHNICAL SKILLS")
-    assert not _is_section_header("Palak Sood")                     # mixed case
-    assert not _is_section_header("- Built APIs with FastAPI")      # bullet
-    assert not _is_section_header("2021 - 2023")                    # no letters
-    assert not _is_section_header("A" * 41)                        # too long
-    assert not _is_section_header("")
 
 
 def test_send_email_attaches_pdf_only_for_matched_jobs():
@@ -82,7 +85,7 @@ def test_send_email_attaches_pdf_only_for_matched_jobs():
             reason="Frontend-heavy role",
         ),
     ]
-    attachments = [create_resume_pdf("Rewritten resume", scored[0].job)]
+    attachments = [create_resume_pdf(make_test_doc(), scored[0].job)]
 
     mock_server = send_with_mock_smtp(scored, attachments)
 

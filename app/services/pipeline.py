@@ -2,10 +2,11 @@ import logging
 
 from app.core.config import settings
 from app.core.store import mark_seen
-from app.models.schemas import Role, RunCounts, ScoredJob
+from app.models.schemas import ResumeDoc, Role, RunCounts, ScoredJob
 from app.services.job_scraper import get_jobs
+from app.services.resume_parser import parse_resume, resume_to_text
 from app.services.resume_reader import read_resume_as_text
-from app.services.rewriter import rewrite_resume_for_job
+from app.services.rewriter import tailor_resume
 from app.services.scorer import score_job_best_role
 from app.services.doc_creator import create_resume_pdf
 from app.services.mailer import send_summary_email
@@ -62,17 +63,25 @@ async def run_private_pipeline(
     )
 
     # The resume is only fetched when something passed the gate, and each
-    # role's resume is read at most once per run.
-    resume_cache: dict[Role, str] = {}
+    # role's resume is read+parsed at most once per run. Tailoring makes
+    # surgical edits to the structured doc; if it fails after retry, the
+    # ORIGINAL resume ships instead (flagged in the digest) — a matched job
+    # always gets an attachment.
+    resume_cache: dict[Role, ResumeDoc] = {}
+    attachments: list[bytes] = []
     for s in matched:
         resume_role = s.matched_role or roles[0]
         if resume_role not in resume_cache:
-            resume_cache[resume_role] = read_resume_as_text(resume_role)
-        s.resume_text = await rewrite_resume_for_job(
+            resume_cache[resume_role] = parse_resume(
+                read_resume_as_text(resume_role)
+            )
+        tailored_doc, tailored_ok = await tailor_resume(
             resume_cache[resume_role], s.job
         )
-
-    attachments = [create_resume_pdf(s.resume_text, s.job) for s in matched]
+        s.resume_text = resume_to_text(tailored_doc)
+        if not tailored_ok:
+            s.reason += " (tailoring unavailable — original resume attached)"
+        attachments.append(create_resume_pdf(tailored_doc, s.job))
 
     send_summary_email(scored, attachments, threshold=effective_threshold)
 
