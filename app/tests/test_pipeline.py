@@ -17,17 +17,20 @@ def make_job(n: int) -> Job:
     )
 
 
-def patch_pipeline(stack: ExitStack, jobs: list[Job], scores: list[JobScore]):
+def patch_pipeline(
+    stack: ExitStack, jobs: list[Job], scores: list[tuple[Role, JobScore]]
+):
     """Patch every side-effecting collaborator at the point of use and
-    return the mocks that tests assert on."""
+    return the mocks that tests assert on. `scores` holds one
+    (best_role, JobScore) tuple per job, in job order."""
     mocks = {
         "get_jobs": stack.enter_context(
             patch("app.services.pipeline.get_jobs", new_callable=AsyncMock,
                   return_value=jobs)
         ),
-        "score_job": stack.enter_context(
-            patch("app.services.pipeline.score_job", new_callable=AsyncMock,
-                  side_effect=scores)
+        "score_best": stack.enter_context(
+            patch("app.services.pipeline.score_job_best_role",
+                  new_callable=AsyncMock, side_effect=scores)
         ),
         "read_resume": stack.enter_context(
             patch("app.services.pipeline.read_resume_as_text",
@@ -58,7 +61,7 @@ async def test_no_new_jobs_sends_no_email_and_scores_nothing():
         counts = await run_private_pipeline(role=Role.ML_AI_ENGINEER)
 
     assert counts.jobs_scored == 0
-    mocks["score_job"].assert_not_awaited()
+    mocks["score_best"].assert_not_awaited()
     mocks["send_email"].assert_not_called()
     mocks["mark_seen"].assert_not_called()
 
@@ -67,9 +70,9 @@ async def test_no_new_jobs_sends_no_email_and_scores_nothing():
 async def test_gate_rewrites_only_jobs_at_or_above_threshold():
     jobs = [make_job(1), make_job(2), make_job(3)]
     scores = [
-        JobScore(score=8, reason="great fit"),
-        JobScore(score=4, reason="weak fit"),
-        JobScore(score=6, reason="borderline fit"),  # == threshold -> passes
+        (Role.ML_AI_ENGINEER, JobScore(score=8, reason="great fit")),
+        (Role.DATA_SCIENCE, JobScore(score=4, reason="weak fit")),
+        (Role.BACKEND_SWE, JobScore(score=6, reason="borderline fit")),  # == threshold
     ]
 
     with ExitStack() as stack:
@@ -77,7 +80,7 @@ async def test_gate_rewrites_only_jobs_at_or_above_threshold():
         stack.enter_context(
             patch("app.services.pipeline.settings.score_threshold", 6.0)
         )
-        counts = await run_private_pipeline(role=Role.ML_AI_ENGINEER)
+        counts = await run_private_pipeline(role=None)
 
     assert counts.jobs_scored == 3
     assert counts.jobs_matched == 2
@@ -86,26 +89,82 @@ async def test_gate_rewrites_only_jobs_at_or_above_threshold():
     rewritten_jobs = [c.args[1] for c in mocks["rewrite"].await_args_list]
     assert [j.title for j in rewritten_jobs] == ["Job 1", "Job 3"]
 
-    # The digest gets ALL scored jobs (skipped visibly included), with
+    # The digest gets ALL scored jobs with their matched roles, and
     # attachments only for the matched ones.
     scored_arg, attachments_arg = mocks["send_email"].call_args.args
     assert len(scored_arg) == 3
+    assert [s.matched_role for s in scored_arg] == [
+        Role.ML_AI_ENGINEER, Role.DATA_SCIENCE, Role.BACKEND_SWE
+    ]
     assert [s.resume_text is not None for s in scored_arg] == [True, False, True]
     assert len(attachments_arg) == 2
-    assert mocks["send_email"].call_args.kwargs["threshold"] == 6.0
 
     # Every fetched job is marked seen, whichever side of the gate it landed on.
     mocks["mark_seen"].assert_called_once_with(jobs)
 
 
 @pytest.mark.asyncio
-async def test_unscored_job_fails_open_without_rewrite():
-    jobs = [make_job(1)]
-    scores = [JobScore(score=None, reason="scoring unavailable")]
+async def test_unrestricted_run_covers_all_roles_default_first():
+    with ExitStack() as stack:
+        mocks = patch_pipeline(
+            stack, [make_job(1)],
+            [(Role.ML_AI_ENGINEER, JobScore(score=2, reason="weak"))],
+        )
+        stack.enter_context(
+            patch("app.services.pipeline.settings.default_role", Role.DATA_SCIENCE)
+        )
+        await run_private_pipeline(role=None)
+
+    roles_arg = mocks["get_jobs"].call_args.kwargs["roles"]
+    assert set(roles_arg) == set(Role)
+    assert roles_arg[0] == Role.DATA_SCIENCE  # preference-ordered
+    # Scoring considers the same preference-ordered role list.
+    assert mocks["score_best"].call_args.args[1] == roles_arg
+
+
+@pytest.mark.asyncio
+async def test_explicit_role_restricts_fetch_and_scoring():
+    with ExitStack() as stack:
+        mocks = patch_pipeline(
+            stack, [make_job(1)],
+            [(Role.BACKEND_SWE, JobScore(score=9, reason="strong"))],
+        )
+        await run_private_pipeline(role=Role.BACKEND_SWE)
+
+    assert mocks["get_jobs"].call_args.kwargs["roles"] == [Role.BACKEND_SWE]
+    assert mocks["score_best"].call_args.args[1] == [Role.BACKEND_SWE]
+
+
+@pytest.mark.asyncio
+async def test_resume_read_once_per_matched_role():
+    """Two jobs matching the same role must share one Drive read; a third
+    matching a different role triggers exactly one more."""
+    jobs = [make_job(1), make_job(2), make_job(3)]
+    scores = [
+        (Role.BACKEND_SWE, JobScore(score=8, reason="fit")),
+        (Role.BACKEND_SWE, JobScore(score=7, reason="fit")),
+        (Role.DATA_SCIENCE, JobScore(score=9, reason="fit")),
+    ]
 
     with ExitStack() as stack:
         mocks = patch_pipeline(stack, jobs, scores)
-        counts = await run_private_pipeline(role=Role.ML_AI_ENGINEER)
+        counts = await run_private_pipeline(role=None)
+
+    assert counts.jobs_matched == 3
+    read_roles = [c.args[0] for c in mocks["read_resume"].call_args_list]
+    assert read_roles == [Role.BACKEND_SWE, Role.DATA_SCIENCE]
+
+
+@pytest.mark.asyncio
+async def test_unscored_job_fails_open_without_rewrite():
+    jobs = [make_job(1)]
+    scores = [
+        (Role.ML_AI_ENGINEER, JobScore(score=None, reason="scoring unavailable"))
+    ]
+
+    with ExitStack() as stack:
+        mocks = patch_pipeline(stack, jobs, scores)
+        counts = await run_private_pipeline(role=None)
 
     assert counts.jobs_matched == 0
     assert counts.jobs_skipped == 1
@@ -118,14 +177,14 @@ async def test_unscored_job_fails_open_without_rewrite():
 @pytest.mark.asyncio
 async def test_per_request_threshold_overrides_config_default():
     jobs = [make_job(1)]
-    scores = [JobScore(score=4, reason="weak fit")]
+    scores = [(Role.ML_AI_ENGINEER, JobScore(score=4, reason="weak fit"))]
 
     with ExitStack() as stack:
         mocks = patch_pipeline(stack, jobs, scores)
         stack.enter_context(
             patch("app.services.pipeline.settings.score_threshold", 6.0)
         )
-        counts = await run_private_pipeline(role=Role.ML_AI_ENGINEER, threshold=3.0)
+        counts = await run_private_pipeline(role=None, threshold=3.0)
 
     assert counts.jobs_matched == 1
     assert mocks["send_email"].call_args.kwargs["threshold"] == 3.0
@@ -134,11 +193,11 @@ async def test_per_request_threshold_overrides_config_default():
 @pytest.mark.asyncio
 async def test_resume_not_read_when_nothing_matches():
     jobs = [make_job(1)]
-    scores = [JobScore(score=2, reason="irrelevant")]
+    scores = [(Role.ML_AI_ENGINEER, JobScore(score=2, reason="irrelevant"))]
 
     with ExitStack() as stack:
         mocks = patch_pipeline(stack, jobs, scores)
-        counts = await run_private_pipeline(role=Role.ML_AI_ENGINEER)
+        counts = await run_private_pipeline(role=None)
 
     assert counts.jobs_matched == 0
     mocks["read_resume"].assert_not_called()

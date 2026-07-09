@@ -37,7 +37,7 @@ def test_role_query_map_covers_every_role():
 
 
 @pytest.mark.asyncio
-async def test_get_jobs_threads_role_into_query():
+async def test_get_jobs_threads_single_role_into_query():
     with patch(
         "app.services.job_scraper._fetch_adzuna", new_callable=AsyncMock
     ) as mock_adzuna, patch(
@@ -47,13 +47,53 @@ async def test_get_jobs_threads_role_into_query():
     ):
         mock_adzuna.return_value = []
 
-        await get_jobs(role=Role.BACKEND_SWE)
+        await get_jobs(roles=[Role.BACKEND_SWE])
 
         expected_query = ROLE_QUERY_MAP[Role.BACKEND_SWE]
         mock_adzuna.assert_awaited_once()
         assert mock_adzuna.call_args.args[0] == expected_query
         mock_indeed.assert_called_once()
         assert mock_indeed.call_args.args[0] == expected_query
+
+
+@pytest.mark.asyncio
+async def test_get_jobs_fetches_every_role_when_unrestricted():
+    """roles=None means the scheduled 'match anything I could do' run:
+    one Adzuna query per role family, combined."""
+    with patch(
+        "app.services.job_scraper._fetch_adzuna", new_callable=AsyncMock
+    ) as mock_adzuna, patch(
+        "app.services.job_scraper._parse_indeed", return_value=[]
+    ), patch(
+        "app.services.job_scraper.filter_unseen", side_effect=lambda jobs: jobs
+    ):
+        mock_adzuna.return_value = []
+
+        await get_jobs()
+
+        queried = {call.args[0] for call in mock_adzuna.await_args_list}
+        assert queried == {ROLE_QUERY_MAP[role] for role in Role}
+
+
+@pytest.mark.asyncio
+async def test_one_failing_role_query_does_not_kill_the_run():
+    ok_job = make_job("Backend Engineer", "Acme", 1)
+
+    async def adzuna_side_effect(query, limit, location=None):
+        if query == ROLE_QUERY_MAP[Role.ML_AI_ENGINEER]:
+            raise Exception("boom")
+        return [ok_job] if query == ROLE_QUERY_MAP[Role.BACKEND_SWE] else []
+
+    with patch(
+        "app.services.job_scraper._fetch_adzuna", side_effect=adzuna_side_effect
+    ), patch(
+        "app.services.job_scraper._parse_indeed", return_value=[]
+    ), patch(
+        "app.services.job_scraper.filter_unseen", side_effect=lambda jobs: jobs
+    ):
+        result = await get_jobs()
+
+    assert result == [ok_job]
 
 
 @pytest.mark.asyncio
@@ -77,7 +117,7 @@ async def test_get_jobs_filters_seen_before_truncating():
     ):
         mock_adzuna.return_value = []
 
-        result = await get_jobs(role=Role.BACKEND_SWE)
+        result = await get_jobs(roles=[Role.BACKEND_SWE])
 
     assert [j.title for j in result] == ["Role 5"]
 
@@ -109,7 +149,7 @@ async def test_adzuna_failure_logged_without_secrets(caplog):
     ), patch(
         "app.services.job_scraper.filter_unseen", side_effect=lambda jobs: jobs
     ), caplog.at_level(logging.ERROR):
-        result = await get_jobs(role=Role.ML_AI_ENGINEER)
+        result = await get_jobs(roles=[Role.ML_AI_ENGINEER])
 
     assert result == []
     assert "Adzuna fetch failed" in caplog.text

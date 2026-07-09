@@ -2,12 +2,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.models.schemas import Job, Role
+from app.models.schemas import Job, JobScore, Role
 from app.services.scorer import (
     MAX_DESCRIPTION_CHARS,
     ROLE_RUBRICS,
     _parse_score_response,
     score_job,
+    score_job_best_role,
 )
 
 
@@ -102,3 +103,49 @@ async def test_score_job_truncates_description():
     assert "x" * (MAX_DESCRIPTION_CHARS + 1) not in user_message
     # The rubric for the requested role is in the prompt.
     assert ROLE_RUBRICS[Role.BACKEND_SWE] in user_message
+    # The candidate's experience level is a scoring invariant (fresher check).
+    system_message = mock_client.chat.completions.create.call_args.kwargs[
+        "messages"
+    ][0]["content"]
+    assert "fresher" in system_message
+
+
+@pytest.mark.asyncio
+async def test_best_role_picks_highest_score():
+    async def fake_score(job, role):
+        return {
+            Role.ML_AI_ENGINEER: JobScore(score=2, reason="not ML"),
+            Role.DATA_SCIENCE: JobScore(score=5, reason="some data work"),
+            Role.BACKEND_SWE: JobScore(score=8, reason="strong backend fit"),
+        }[role]
+
+    with patch("app.services.scorer.score_job", side_effect=fake_score):
+        role, score = await score_job_best_role(make_job(), list(Role))
+
+    assert role == Role.BACKEND_SWE
+    assert score.score == 8
+
+
+@pytest.mark.asyncio
+async def test_best_role_tie_goes_to_earlier_preference():
+    async def fake_score(job, role):
+        return JobScore(score=7, reason="equal fit")
+
+    with patch("app.services.scorer.score_job", side_effect=fake_score):
+        role, _ = await score_job_best_role(
+            make_job(), [Role.DATA_SCIENCE, Role.BACKEND_SWE]
+        )
+
+    assert role == Role.DATA_SCIENCE
+
+
+@pytest.mark.asyncio
+async def test_best_role_all_unscored_stays_failed_open():
+    async def fake_score(job, role):
+        return JobScore(score=None, reason="scoring unavailable")
+
+    with patch("app.services.scorer.score_job", side_effect=fake_score):
+        role, score = await score_job_best_role(make_job(), list(Role))
+
+    assert role == list(Role)[0]
+    assert score.score is None

@@ -19,12 +19,14 @@ async def verify_run_token(x_api_key: str | None = Header(default=None)) -> None
 
 @router.post("/run", response_model=RunResponse, dependencies=[Depends(verify_run_token)])
 async def run_pipeline(request: RunRequest = RunRequest()):
-    role = request.role or settings.default_role
-    logger.info(f"Run requested: caller_role={request.role}, effective_role={role.value}")
+    # No role = match against ALL role families (a job only needs to fit
+    # one); an explicit role restricts the run to that family.
+    scope = request.role.value if request.role else "all roles"
+    logger.info(f"Run requested: scope={scope}")
 
     try:
         counts = await run_private_pipeline(
-            role=role, location=request.location, threshold=request.threshold
+            role=request.role, location=request.location, threshold=request.threshold
         )
         status = "email_sent" if counts.jobs_scored else "no_new_jobs"
         return RunResponse(status=status, **counts.model_dump())

@@ -32,10 +32,16 @@ class Settings(BaseSettings):
     sender_email: str
     gmail_app_password: str
     recipient_email: str
+    # Highest-preference role: listed first when a run matches against all
+    # role families (wins scoring ties), and the tie-break anchor for
+    # preference ordering.
     default_role: Role = Role.ML_AI_ENGINEER
     # Groq model for scoring + rewriting. Swappable via env var without a
     # deploy (llama-3.3-70b was deprecated by Groq mid-project).
     groq_model: str = "moonshotai/kimi-k2"
+    # Injected into the scoring prompt as a hard experience check: postings
+    # demanding clearly more experience are capped low regardless of stack.
+    candidate_experience: str = "fresher — 0-1 years of experience, one internship"
     score_threshold: float = 6.0        # scoring gate default; RunRequest.threshold overrides per run
     # Per-role resume Google Doc ids (D1: profile-ready). Empty = every role
     # uses google_resume_doc_id. Set as JSON, e.g.

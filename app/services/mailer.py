@@ -25,11 +25,16 @@ def _score_cell(s: ScoredJob) -> str:
     return "n/a" if s.score is None else f"{s.score}/10"
 
 
+def _matched_role_cell(s: ScoredJob) -> str:
+    return s.matched_role.value if s.matched_role else "—"
+
+
 def _rows(jobs: list[ScoredJob], with_attachment: bool) -> str:
     return "".join(
         f"""<tr>
         <td style='{_CELL}'>{s.job.company}</td>
         <td style='{_CELL}'>{s.job.title}</td>
+        <td style='{_CELL}'>{_matched_role_cell(s)}</td>
         <td style='{_CELL}'>{_score_cell(s)}</td>
         <td style='{_CELL}'>{s.reason}</td>
         <td style='{_CELL}'><a href='{s.job.url}'>Apply</a></td>
@@ -44,6 +49,7 @@ def _table(jobs: list[ScoredJob], with_attachment: bool) -> str:
         <tr style='background:#f0f0f0'>
             <th style='{_CELL}'>Company</th>
             <th style='{_CELL}'>Role</th>
+            <th style='{_CELL}'>Matched as</th>
             <th style='{_CELL}'>Score</th>
             <th style='{_CELL}'>Reason</th>
             <th style='{_CELL}'>Job Link</th>
