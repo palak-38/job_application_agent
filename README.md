@@ -76,7 +76,7 @@ python -m pytest app/tests  # 79 tests, no network required
 
 Deploying: `render.yaml` is a ready Render blueprint; set the env vars in the dashboard, add `APP_URL` + `RUN_TOKEN` as GitHub repo secrets, and the `daily-digest` workflow does the rest.
 
-## Limitations, honestly
+## Limitations
 
 - **Human-in-the-loop by design** — it prepares applications; it never submits them.
 - Per-job tailoring runs sequentially; no concurrency claims until that's built and measured.
