@@ -23,6 +23,42 @@ class Job(BaseModel):
     posted_at: datetime | None = None
 
 
+class ResumeEntry(BaseModel):
+    """One unit inside a section: a role/project with bullets, or a bare
+    text line (summary paragraphs, skill lists) when bullets/dates are
+    absent."""
+    heading: str | None = None
+    dates: str | None = None
+    bullets: list[str] = []
+
+
+class ResumeSection(BaseModel):
+    title: str
+    entries: list[ResumeEntry] = []
+
+
+class ResumeDoc(BaseModel):
+    """The resume as structured data. The LLM edits fields of this model
+    (never freeform text), and the PDF renderer lays it out from here —
+    so tailoring can't destroy the document's structure."""
+    name: str
+    contact: str | None = None
+    sections: list[ResumeSection] = []
+
+
+class BulletEdit(BaseModel):
+    section: int
+    entry: int
+    bullet: int
+    new_text: str
+
+
+class ResumeEdits(BaseModel):
+    """The complete set of changes the tailoring model may request."""
+    summary: str | None = None
+    bullet_edits: list[BulletEdit] = []
+
+
 class JobScore(BaseModel):
     """Result of one scoring call. score=None means the model's output was
     unparseable even after a retry — the job fails open (shown in the digest

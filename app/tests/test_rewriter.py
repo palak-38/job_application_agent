@@ -1,9 +1,17 @@
-import pytest
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.config import settings
-from app.services.rewriter import rewrite_resume_for_job
-from app.models.schemas import Job
+import pytest
+
+from app.models.schemas import (
+    BulletEdit,
+    Job,
+    ResumeDoc,
+    ResumeEdits,
+    ResumeEntry,
+    ResumeSection,
+)
+from app.services.rewriter import apply_edits, tailor_resume
 
 
 def make_test_job() -> Job:
@@ -16,54 +24,120 @@ def make_test_job() -> Job:
     )
 
 
+def make_doc() -> ResumeDoc:
+    return ResumeDoc(
+        name="Palak Sood",
+        contact="mail@example.com",
+        sections=[
+            ResumeSection(
+                title="EXPERIENCE",
+                entries=[
+                    ResumeEntry(
+                        heading="Intern | Acme",
+                        dates="2025",
+                        bullets=["Built APIs", "Wrote tests"],
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def make_model_mock(*responses: str):
+    client = MagicMock()
+    side_effects = []
+    for text in responses:
+        response = MagicMock()
+        response.choices[0].message.content = text
+        side_effects.append(response)
+    client.chat.completions.create = AsyncMock(side_effect=side_effects)
+    return client
+
+
+def test_apply_edits_rewrites_targeted_bullet_only():
+    doc = make_doc()
+    edits = ResumeEdits(
+        bullet_edits=[
+            BulletEdit(section=0, entry=0, bullet=0, new_text="Built FastAPI services")
+        ]
+    )
+
+    result = apply_edits(doc, edits)
+
+    assert result.sections[0].entries[0].bullets == [
+        "Built FastAPI services", "Wrote tests",
+    ]
+    # The original doc is untouched (deep copy).
+    assert doc.sections[0].entries[0].bullets[0] == "Built APIs"
+
+
+def test_apply_edits_skips_out_of_range_indices():
+    doc = make_doc()
+    edits = ResumeEdits(
+        bullet_edits=[
+            BulletEdit(section=5, entry=0, bullet=0, new_text="nope"),
+            BulletEdit(section=0, entry=0, bullet=99, new_text="nope"),
+        ]
+    )
+
+    result = apply_edits(doc, edits)
+
+    assert result == doc  # nothing changed, nothing crashed
+
+
+def test_apply_edits_inserts_summary_section_when_missing():
+    result = apply_edits(make_doc(), ResumeEdits(summary="Fresher backend engineer."))
+
+    assert result.sections[0].title == "SUMMARY"
+    assert result.sections[0].entries[0].heading == "Fresher backend engineer."
+
+
+def test_apply_edits_replaces_existing_summary_section():
+    doc = make_doc()
+    doc.sections.insert(
+        0,
+        ResumeSection(title="SUMMARY", entries=[ResumeEntry(heading="Old summary")]),
+    )
+
+    result = apply_edits(doc, ResumeEdits(summary="New tailored summary"))
+
+    assert result.sections[0].entries[0].heading == "New tailored summary"
+    assert len(result.sections) == len(doc.sections)
+
+
 @pytest.mark.asyncio
-async def test_rewriter_returns_string():
-    fake_response = MagicMock()
-    fake_response.choices[0].message.content = "Rewritten resume content here"
+async def test_tailor_applies_valid_model_edits():
+    edits_json = json.dumps(
+        {
+            "summary": "Backend-focused fresher.",
+            "bullet_edits": [
+                {"section": 0, "entry": 0, "bullet": 0,
+                 "new_text": "Built FastAPI services in Python"}
+            ],
+        }
+    )
+    # Model output wrapped in markdown fences must still parse.
+    client = make_model_mock(f"```json\n{edits_json}\n```")
 
-    with patch("app.services.rewriter.get_groq_client") as mock_client:
-        mock_instance = MagicMock()
-        mock_instance.chat.completions.create = AsyncMock(
-            return_value=fake_response
-        )
-        mock_client.return_value = mock_instance
+    with patch("app.services.rewriter.get_groq_client", return_value=client):
+        result, ok = await tailor_resume(make_doc(), make_test_job())
 
-        result = await rewrite_resume_for_job("Original resume text", make_test_job())
-
-    assert isinstance(result, str)
-    assert len(result) > 0
-
-
-@pytest.mark.asyncio
-async def test_rewriter_returns_stripped_content():
-    fake_response = MagicMock()
-    fake_response.choices[0].message.content = "  Rewritten resume  \n"
-
-    with patch("app.services.rewriter.get_groq_client") as mock_client:
-        mock_instance = MagicMock()
-        mock_instance.chat.completions.create = AsyncMock(
-            return_value=fake_response
-        )
-        mock_client.return_value = mock_instance
-
-        result = await rewrite_resume_for_job("Original resume text", make_test_job())
-
-    assert result == "Rewritten resume"
+    assert ok is True
+    assert result.sections[0].title == "SUMMARY"
+    assert (
+        result.sections[1].entries[0].bullets[0]
+        == "Built FastAPI services in Python"
+    )
 
 
 @pytest.mark.asyncio
-async def test_rewriter_passes_correct_model():
-    fake_response = MagicMock()
-    fake_response.choices[0].message.content = "Rewritten resume"
+async def test_tailor_fails_open_to_original_after_two_bad_outputs():
+    client = make_model_mock("not json at all", "still { not json")
 
-    with patch("app.services.rewriter.get_groq_client") as mock_client:
-        mock_instance = MagicMock()
-        create_mock = AsyncMock(return_value=fake_response)
-        mock_instance.chat.completions.create = create_mock
-        mock_client.return_value = mock_instance
+    with patch("app.services.rewriter.get_groq_client", return_value=client):
+        doc = make_doc()
+        result, ok = await tailor_resume(doc, make_test_job())
 
-        await rewrite_resume_for_job("Original resume text", make_test_job())
-
-    call_kwargs = create_mock.call_args.kwargs
-    assert call_kwargs["model"] == settings.groq_model  # configurable, not hardcoded
-    assert call_kwargs["temperature"] == 0.3
+    assert ok is False
+    assert result == doc  # original, untouched
+    assert client.chat.completions.create.await_count == 2
