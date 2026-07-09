@@ -104,23 +104,32 @@ def _deduplicate(jobs: list[Job], limit: int) -> list[Job]:
 
 
 async def get_jobs(
-    role: Role = settings.default_role, location: str | None = None
+    roles: list[Role] | None = None, location: str | None = None
 ) -> list[Job]:
-    query = ROLE_QUERY_MAP[role]
-    logger.info(f"Resolved role={role.value!r} to query={query!r}")
+    """Fetch postings for every role family in `roles` (None = all roles,
+    ordered by preference). One Adzuna query per role, in parallel, with
+    per-query failure isolation — one dead query must not kill the run."""
+    if not roles:
+        roles = list(Role)
+    queries = [ROLE_QUERY_MAP[role] for role in roles]
+    logger.info(f"Fetching jobs for roles={[r.value for r in roles]} -> queries={queries}")
 
     loop = asyncio.get_event_loop()
 
+    # Indeed is the documented dead/demo path — one query is plenty.
     indeed_future = loop.run_in_executor(
-        None, _parse_indeed, query, settings.jobs_per_run
+        None, _parse_indeed, queries[0], settings.jobs_per_run
     )
-    adzuna_future = _fetch_adzuna(query, settings.jobs_per_run, location)
+    adzuna_futures = [
+        _fetch_adzuna(query, settings.jobs_per_run, location) for query in queries
+    ]
 
-    indeed_jobs, adzuna_jobs = await asyncio.gather(
+    results = await asyncio.gather(
         indeed_future,
-        adzuna_future,
+        *adzuna_futures,
         return_exceptions=True,
     )
+    indeed_jobs, adzuna_results = results[0], results[1:]
 
     combined = []
 
@@ -129,10 +138,14 @@ async def get_jobs(
     else:
         combined.extend(indeed_jobs)
 
-    if isinstance(adzuna_jobs, Exception):
-        logger.error(f"Adzuna fetch failed: {_redact_secrets(str(adzuna_jobs))}")
-    else:
-        combined.extend(adzuna_jobs)
+    for query, adzuna_jobs in zip(queries, adzuna_results):
+        if isinstance(adzuna_jobs, Exception):
+            logger.error(
+                f"Adzuna fetch failed for {query!r}: "
+                f"{_redact_secrets(str(adzuna_jobs))}"
+            )
+        else:
+            combined.extend(adzuna_jobs)
 
     # Filter out already-seen jobs before capping to jobs_per_run, so a run
     # doesn't get truncated down to postings that turn out to all be stale.

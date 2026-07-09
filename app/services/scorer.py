@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 
@@ -12,32 +13,37 @@ logger = logging.getLogger(__name__)
 MAX_DESCRIPTION_CHARS = 1500
 
 # One prompt template + a rubric dict keyed by the Role enum — the invariant
-# instructions (scale, output format) live once; only the rubric varies per
-# role. Do not add per-role prompt templates.
+# instructions (scale, output format, experience check) live once; only the
+# rubric varies per role. Do not add per-role prompt templates.
+#
+# Rubrics score transferability, not exact stack match: an adjacent stack is
+# a mid-range score, not a zero — the gate exists to drop irrelevant
+# postings, not defensible ones.
 ROLE_RUBRICS: dict[Role, str] = {
     Role.ML_AI_ENGINEER: (
-        "Strong match: building/integrating LLM or GenAI applications, "
-        "Python, model-API integration (OpenAI/Anthropic/open-weights), "
-        "prompt engineering, RAG, vector databases, or light MLOps "
-        "(serving/monitoring models). Moderate: general ML engineering with "
-        "Python. Weak: pure research roles requiring a PhD, heavy "
-        "distributed-training infrastructure, or non-Python stacks."
+        "Strong (7-10): building/integrating LLM or GenAI applications, "
+        "Python, model-API integration, prompt engineering, RAG, vector "
+        "databases, or light MLOps. Moderate (4-6): general ML/AI work "
+        "where Python or the specific stack differs but the skills "
+        "transfer (e.g. ML in another language, data-heavy backend). "
+        "Weak (0-3): unrelated disciplines — pure research demanding a "
+        "PhD, non-technical roles, no ML/AI content at all."
     ),
     Role.DATA_SCIENCE: (
-        "Strong match: data analysis and statistical modeling with "
-        "Python/SQL, building predictive models, experimentation/AB testing, "
-        "and communicating insights to stakeholders. Moderate: analytics "
-        "engineering or BI-heavy roles with Python. Weak: pure data-entry, "
-        "roles demanding deep domain credentials (e.g. quant finance PhD), "
-        "or dashboard-only tooling with no modeling."
+        "Strong (7-10): data analysis and statistical modeling with "
+        "Python/SQL, predictive models, experimentation/AB testing, "
+        "insight communication. Moderate (4-6): analytics engineering, "
+        "BI-heavy roles, or data roles on an adjacent stack where the "
+        "skills transfer. Weak (0-3): pure data entry, roles demanding "
+        "deep specialist credentials, no data content."
     ),
     Role.BACKEND_SWE: (
-        "Strong match: designing and building APIs/services in Python "
-        "(FastAPI/Django/Flask), relational databases, testing, and "
-        "deployment/CI. Moderate: full-stack roles that are backend-leaning, "
-        "or backend in an adjacent language with Python welcome. Weak: "
-        "frontend-heavy, mobile, or roles centered on a stack with no "
-        "Python overlap."
+        "Strong (7-10): designing/building APIs and services in Python "
+        "(FastAPI/Django/Flask), relational databases, testing, "
+        "deployment/CI. Moderate (4-6): backend or full-stack work in an "
+        "adjacent language (Node/Java/Go/TypeScript) where the "
+        "engineering skills transfer. Weak (0-3): frontend-only, mobile, "
+        "or non-engineering roles."
     ),
 }
 
@@ -46,6 +52,13 @@ posting and a rubric for a target role, score how worthwhile the posting is \
 to pursue for that role.
 
 Scale: 0 = completely irrelevant, 5 = borderline, 10 = ideal match.
+
+CANDIDATE EXPERIENCE LEVEL: {candidate_experience}.
+Apply this as a hard check on top of the rubric: if the posting requires \
+clearly more experience (3+ years, or senior/lead/staff/principal titles), \
+cap the score at 3 no matter how well the stack matches, and say so in the \
+reason. Fresher/entry-level/junior/graduate-friendly postings that fit the \
+rubric deserve the top of their range.
 
 Respond with EXACTLY two lines and nothing else:
 SCORE: <integer 0-10>
@@ -92,7 +105,12 @@ async def _call_scoring_model(job: Job, role: Role) -> str:
     response = await client.chat.completions.create(
         model=settings.groq_model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.format(
+                    candidate_experience=settings.candidate_experience
+                ),
+            },
             {"role": "user", "content": user_message},
         ],
         temperature=0,
@@ -102,7 +120,7 @@ async def _call_scoring_model(job: Job, role: Role) -> str:
 
 
 async def score_job(job: Job, role: Role) -> JobScore:
-    """Score one job against the role's rubric. Retries once on unparseable
+    """Score one job against one role's rubric. Retries once on unparseable
     output, then fails open (score=None) — a scoring hiccup must never kill
     the run or silently hide a posting."""
     for attempt in (1, 2):
@@ -122,3 +140,26 @@ async def score_job(job: Job, role: Role) -> JobScore:
     return JobScore(
         score=None, reason="scoring unavailable (unparseable model output)"
     )
+
+
+async def score_job_best_role(
+    job: Job, roles: list[Role]
+) -> tuple[Role, JobScore]:
+    """Score one job against every candidate role in parallel and return the
+    best (role, score) pair. A job only needs to fit ONE of the user's role
+    families to be worth surfacing; earlier roles in `roles` win ties (the
+    list is ordered by preference)."""
+    scores = await asyncio.gather(*(score_job(job, role) for role in roles))
+
+    best_role, best_score = roles[0], scores[0]
+    for role, job_score in zip(roles[1:], scores[1:]):
+        best = -1 if best_score.score is None else best_score.score
+        current = -1 if job_score.score is None else job_score.score
+        if current > best:
+            best_role, best_score = role, job_score
+
+    logger.info(
+        f"Best role for {job.company} — {job.title}: {best_role.value} "
+        f"({best_score.score})"
+    )
+    return best_role, best_score

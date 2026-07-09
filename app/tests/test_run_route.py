@@ -29,15 +29,15 @@ def test_run_with_explicit_role(mock_pipeline):
 
 
 @patch("app.api.routes.run.run_private_pipeline", new_callable=AsyncMock)
-def test_run_falls_back_to_default_role_when_body_empty(mock_pipeline):
+def test_run_with_empty_body_means_all_roles(mock_pipeline):
+    """No role = the pipeline matches against every role family (role=None);
+    the scheduler's empty body gets the widest net."""
     mock_pipeline.return_value = COUNTS
 
     resp = client.post("/api/v1/run", json={})
 
     assert resp.status_code == 200
-    mock_pipeline.assert_awaited_once_with(
-        role=Role.ML_AI_ENGINEER, location=None, threshold=None
-    )
+    mock_pipeline.assert_awaited_once_with(role=None, location=None, threshold=None)
 
 
 @patch("app.api.routes.run.run_private_pipeline", new_callable=AsyncMock)
@@ -47,9 +47,7 @@ def test_run_threads_caller_threshold_through(mock_pipeline):
     resp = client.post("/api/v1/run", json={"threshold": 7.5})
 
     assert resp.status_code == 200
-    mock_pipeline.assert_awaited_once_with(
-        role=Role.ML_AI_ENGINEER, location=None, threshold=7.5
-    )
+    mock_pipeline.assert_awaited_once_with(role=None, location=None, threshold=7.5)
 
 
 @patch("app.api.routes.run.run_private_pipeline", new_callable=AsyncMock)

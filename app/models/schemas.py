@@ -33,10 +33,12 @@ class JobScore(BaseModel):
 
 class ScoredJob(BaseModel):
     """A job after the scoring gate. resume_text is set only for jobs that
-    scored at or above the threshold and were rewritten."""
+    scored at or above the threshold and were rewritten. matched_role is the
+    role family the job scored best against."""
     job: Job
     score: int | None
     reason: str
+    matched_role: Role | None = None
     resume_text: str | None = None
 
 

@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app.models.schemas import Job, ScoredJob
+from app.models.schemas import Job, Role, ScoredJob
 from app.services.doc_creator import _is_section_header, create_resume_pdf
 from app.services.mailer import send_summary_email
 
@@ -103,12 +103,14 @@ def test_digest_shows_scores_and_visibly_skipped_section():
             job=make_test_job(1, "Acme Corp"),
             score=8,
             reason="Strong Python/FastAPI overlap",
+            matched_role=Role.BACKEND_SWE,
             resume_text="Rewritten resume",
         ),
         ScoredJob(
             job=make_test_job(2, "Bland Inc"),
             score=3,
             reason="Frontend-heavy role",
+            matched_role=Role.ML_AI_ENGINEER,
         ),
         ScoredJob(
             job=make_test_job(3, "Mystery Ltd"),
@@ -132,6 +134,9 @@ def test_digest_shows_scores_and_visibly_skipped_section():
     assert "8/10" in html and "3/10" in html and "n/a" in html
     assert "Strong Python/FastAPI overlap" in html
     assert "Frontend-heavy role" in html
+    # The role each job matched as is visible in the digest.
+    assert "Matched as" in html
+    assert "backend_swe" in html and "ml_ai_engineer" in html
 
 
 def test_digest_uses_resend_api_when_key_configured():
