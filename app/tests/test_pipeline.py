@@ -55,6 +55,9 @@ def patch_pipeline(
         "mark_seen": stack.enter_context(
             patch("app.services.pipeline.mark_seen")
         ),
+        "record_run": stack.enter_context(
+            patch("app.services.pipeline.record_run")
+        ),
     }
     return mocks
 
@@ -69,6 +72,7 @@ async def test_no_new_jobs_sends_no_email_and_scores_nothing():
     mocks["score_best"].assert_not_awaited()
     mocks["send_email"].assert_not_called()
     mocks["mark_seen"].assert_not_called()
+    assert mocks["record_run"].call_args.kwargs["status"] == "no_new_jobs"
 
 
 @pytest.mark.asyncio
@@ -106,6 +110,8 @@ async def test_gate_rewrites_only_jobs_at_or_above_threshold():
 
     # Every fetched job is marked seen, whichever side of the gate it landed on.
     mocks["mark_seen"].assert_called_once_with(jobs)
+    # The run lands in history for the landing page.
+    assert mocks["record_run"].call_args.kwargs["status"] == "email_sent"
 
 
 @pytest.mark.asyncio

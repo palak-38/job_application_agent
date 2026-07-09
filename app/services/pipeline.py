@@ -1,7 +1,7 @@
 import logging
 
 from app.core.config import settings
-from app.core.store import mark_seen
+from app.core.store import mark_seen, record_run
 from app.models.schemas import ResumeDoc, Role, RunCounts, ScoredJob
 from app.services.job_scraper import get_jobs
 from app.services.resume_parser import parse_resume, resume_to_text
@@ -32,9 +32,11 @@ async def run_private_pipeline(
         threshold if threshold is not None else settings.score_threshold
     )
     roles = _candidate_roles(role)
+    requested_role = role.value if role else None
     jobs = await get_jobs(roles=roles, location=location)
     if not jobs:
         logger.info("No new jobs to process — skipping scoring and digest email")
+        record_run(requested_role, 0, 0, 0, status="no_new_jobs")
         return RunCounts(jobs_scored=0, jobs_matched=0, jobs_skipped=0)
 
     # Scoring gate (F5): every job gets scored against each candidate role's
@@ -89,6 +91,13 @@ async def run_private_pipeline(
     # permanently skips a posting. Sub-threshold and unscored jobs are
     # marked too: a posting is scored exactly once, never re-scored.
     mark_seen(jobs)
+    record_run(
+        requested_role,
+        len(scored),
+        len(matched),
+        len(scored) - len(matched),
+        status="email_sent",
+    )
     return RunCounts(
         jobs_scored=len(scored),
         jobs_matched=len(matched),

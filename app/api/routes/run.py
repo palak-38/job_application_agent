@@ -1,6 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, Header, HTTPException
 from app.core.config import settings
+from app.core.store import record_run
 from app.models.schemas import RunRequest, RunResponse
 from app.services.pipeline import run_private_pipeline
 
@@ -32,4 +33,7 @@ async def run_pipeline(request: RunRequest = RunRequest()):
         return RunResponse(status=status, **counts.model_dump())
     except Exception as e:
         logger.exception("Pipeline failed")
+        record_run(
+            request.role.value if request.role else None, 0, 0, 0, status="failed"
+        )
         raise HTTPException(status_code=500, detail=str(e))
