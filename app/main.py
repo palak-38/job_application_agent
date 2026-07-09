@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 from fastapi import FastAPI
-from app.api.routes import health, jobs, run
+from app.api.routes import health, home, jobs, run
 
 
 logging.basicConfig(level=logging.INFO)
@@ -30,3 +30,4 @@ app = FastAPI(
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(run.router, prefix="/api/v1")
+app.include_router(home.router)  # landing page at / and run history at /runs

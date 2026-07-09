@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app.core.store import filter_unseen, mark_seen
+from app.core.store import filter_unseen, mark_seen, recent_runs, record_run
 from app.models.schemas import Job
 
 
@@ -48,6 +48,26 @@ def test_mark_seen_is_idempotent(tmp_path):
     mark_seen(jobs, db_path=db)  # duplicate URL must not raise
 
     assert filter_unseen(jobs, db_path=db) == []
+
+
+def test_run_history_roundtrip(tmp_path):
+    db = str(tmp_path / "seen.db")
+    record_run(None, 5, 2, 3, status="email_sent", db_path=db)
+    record_run("backend_swe", 0, 0, 0, status="no_new_jobs", db_path=db)
+
+    runs = recent_runs(db_path=db)
+
+    assert len(runs) == 2
+    assert runs[0]["requested_role"] == "backend_swe"  # newest first
+    assert runs[0]["status"] == "no_new_jobs"
+    assert runs[1]["requested_role"] == "all"          # None renders as 'all'
+    assert runs[1]["jobs_scored"] == 5 and runs[1]["jobs_matched"] == 2
+
+
+def test_record_run_never_raises(tmp_path):
+    """History is best-effort: a broken history write must not take down a
+    run that already sent its email."""
+    record_run("x", 1, 1, 0, status="ok", db_path="Z:/nonexistent/dir/db.sqlite")
 
 
 def test_filter_unseen_uses_one_query_for_all_urls(tmp_path):

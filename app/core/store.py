@@ -22,14 +22,27 @@ from app.models.schemas import Job
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS seen_jobs (
-    url     TEXT PRIMARY KEY,
-    company TEXT,
-    title   TEXT,
-    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
-)
-"""
+_SCHEMAS = [
+    """
+    CREATE TABLE IF NOT EXISTS seen_jobs (
+        url     TEXT PRIMARY KEY,
+        company TEXT,
+        title   TEXT,
+        seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS run_history (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        ran_at         TEXT NOT NULL DEFAULT (datetime('now')),
+        requested_role TEXT,
+        jobs_scored    INTEGER NOT NULL,
+        jobs_matched   INTEGER NOT NULL,
+        jobs_skipped   INTEGER NOT NULL,
+        status         TEXT NOT NULL
+    )
+    """,
+]
 
 _backend_logged = False
 
@@ -57,7 +70,8 @@ def _connect(db_path: str | None = None):
         conn = sqlite3.connect(db_path or settings.sqlite_db_path)
 
     try:
-        conn.execute(_SCHEMA)
+        for schema in _SCHEMAS:
+            conn.execute(schema)
         yield conn
         conn.commit()
     finally:
@@ -96,3 +110,45 @@ def mark_seen(jobs: list[Job], db_path: str | None = None) -> None:
             [(str(job.url), job.company, job.title) for job in jobs],
         )
     logger.info(f"Dedup: recorded {len(jobs)} job(s) as seen")
+
+
+def record_run(
+    requested_role: str | None,
+    jobs_scored: int,
+    jobs_matched: int,
+    jobs_skipped: int,
+    status: str,
+    db_path: str | None = None,
+) -> None:
+    """Append one row of run history (powers the landing page / GET /runs).
+    Best-effort: history must never take down a run that already succeeded."""
+    try:
+        with _connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO run_history (requested_role, jobs_scored, "
+                "jobs_matched, jobs_skipped, status) VALUES (?, ?, ?, ?, ?)",
+                (requested_role, jobs_scored, jobs_matched, jobs_skipped, status),
+            )
+    except Exception:
+        logger.exception("Failed to record run history")
+
+
+def recent_runs(limit: int = 20, db_path: str | None = None) -> list[dict]:
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT ran_at, requested_role, jobs_scored, jobs_matched, "
+            "jobs_skipped, status FROM run_history ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    return [
+        {
+            "ran_at": row[0],
+            "requested_role": row[1] or "all",
+            "jobs_scored": row[2],
+            "jobs_matched": row[3],
+            "jobs_skipped": row[4],
+            "status": row[5],
+        }
+        for row in rows
+    ]
