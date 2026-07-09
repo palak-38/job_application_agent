@@ -1,6 +1,7 @@
 import logging
 import re
 
+from app.core.config import settings
 from app.integrations.groq_client import get_groq_client
 from app.models.schemas import Job, JobScore, Role
 
@@ -89,7 +90,7 @@ async def _call_scoring_model(job: Job, role: Role) -> str:
         description=job.description[:MAX_DESCRIPTION_CHARS],
     )
     response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=settings.groq_model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},

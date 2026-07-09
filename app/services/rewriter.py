@@ -1,4 +1,6 @@
 import logging
+
+from app.core.config import settings
 from app.integrations.groq_client import get_groq_client
 from app.models.schemas import Job
 
@@ -35,7 +37,7 @@ async def rewrite_resume_for_job(resume_text: str, job: Job) -> str:
     )
 
     response = await client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=settings.groq_model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_message},
