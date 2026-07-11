@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     # preference ordering.
     default_role: Role = Role.ML_AI_ENGINEER
     # Groq model for scoring + rewriting. Swappable via env var without a
-    # deploy (llama-3.3-70b was deprecated by Groq mid-project). The id must
-    # be the exact Groq model slug — "moonshotai/kimi-k2" (no -instruct)
-    # returns a 404 model_not_found.
-    groq_model: str = "moonshotai/kimi-k2-instruct"
+    # deploy. Must be a slug the account can access: Kimi K2 is paid-only,
+    # so the free tier 404s on it — gpt-oss-120b is a core free-tier model
+    # and Groq's strongest free general/writing model.
+    groq_model: str = "openai/gpt-oss-120b"
     # Injected into the scoring prompt as a hard experience check: postings
     # demanding clearly more experience are capped low regardless of stack.
     candidate_experience: str = "fresher — 0-1 years of experience, one internship"
