@@ -1,9 +1,9 @@
-import asyncio
+import json
 import logging
 import re
 
 from app.core.config import settings
-from app.integrations.groq_client import get_groq_client
+from app.integrations.groq_client import chat_completion
 from app.models.schemas import Job, JobScore, Role
 
 logger = logging.getLogger(__name__)
@@ -47,27 +47,28 @@ ROLE_RUBRICS: dict[Role, str] = {
     ),
 }
 
+# One call scores a job against EVERY candidate role at once — cuts scoring
+# tokens/calls ~3x vs a call per role, which matters against the free-tier
+# per-model token budget.
 SYSTEM_PROMPT = """You are a strict job-relevance screener. Given a job \
-posting and a rubric for a target role, score how worthwhile the posting is \
-to pursue for that role.
+posting and a rubric for EACH target role, score how worthwhile the posting \
+is to pursue for each role independently.
 
 Scale: 0 = completely irrelevant, 5 = borderline, 10 = ideal match.
 
 CANDIDATE EXPERIENCE LEVEL: {candidate_experience}.
-Apply this as a hard check on top of the rubric: if the posting requires \
+Apply this as a hard check on top of every rubric: if the posting requires \
 clearly more experience (3+ years, or senior/lead/staff/principal titles), \
-cap the score at 3 no matter how well the stack matches, and say so in the \
-reason. Fresher/entry-level/junior/graduate-friendly postings that fit the \
+cap that score at 3 no matter how well the stack matches, and say so in the \
+reason. Fresher/entry-level/junior/graduate-friendly postings that fit a \
 rubric deserve the top of their range.
 
-Respond with EXACTLY two lines and nothing else:
-SCORE: <integer 0-10>
-REASON: <one short sentence>"""
+Respond with ONLY a JSON object, no markdown fences, mapping each role key to \
+its score and a one-sentence reason:
+{{"<role_key>": {{"score": <integer 0-10>, "reason": "<one short sentence>"}}}}"""
 
-USER_TEMPLATE = """TARGET ROLE: {role}
-
-RUBRIC FOR THIS ROLE:
-{role_rubric}
+USER_TEMPLATE = """ROLES AND RUBRICS:
+{rubrics_block}
 
 JOB POSTING:
 TITLE: {title}
@@ -75,35 +76,56 @@ COMPANY: {company}
 LOCATION: {location}
 DESCRIPTION: {description}"""
 
-_SCORE_RE = re.compile(r"SCORE:\s*(\d{1,2})", re.IGNORECASE)
-_REASON_RE = re.compile(r"REASON:\s*(.+)", re.IGNORECASE)
+_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
 
-def _parse_score_response(text: str) -> JobScore | None:
-    """Parse the model's 'SCORE: n / REASON: ...' output. Returns None when
-    no score can be extracted, so the caller can retry or fail open."""
-    score_match = _SCORE_RE.search(text)
-    if not score_match:
+def _parse_batch_scores(
+    raw: str, roles: list[Role]
+) -> dict[Role, JobScore] | None:
+    """Parse the model's per-role JSON into JobScores. Returns None if the
+    payload isn't usable at all, so the caller can retry or fail open. A role
+    missing from an otherwise-valid payload gets score=None (fail-open for
+    that role only)."""
+    try:
+        data = json.loads(_FENCE_RE.sub("", raw).strip())
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
         return None
 
-    score = max(0, min(10, int(score_match.group(1))))
-    reason_match = _REASON_RE.search(text)
-    reason = reason_match.group(1).strip() if reason_match else "(no reason given)"
-    return JobScore(score=score, reason=reason)
+    result: dict[Role, JobScore] = {}
+    for role in roles:
+        entry = data.get(role.value)
+        if isinstance(entry, dict) and "score" in entry:
+            try:
+                score = max(0, min(10, int(entry["score"])))
+            except (TypeError, ValueError):
+                score, reason = None, "unparseable score for this role"
+            else:
+                reason = str(entry.get("reason", "")).strip() or "(no reason given)"
+            result[role] = JobScore(score=score, reason=reason)
+        else:
+            result[role] = JobScore(score=None, reason="no score returned for this role")
+
+    # Every score missing → treat the whole payload as unusable (retry).
+    if all(s.score is None for s in result.values()):
+        return None
+    return result
 
 
-async def _call_scoring_model(job: Job, role: Role) -> str:
-    client = get_groq_client()
+async def _call_scoring_model(job: Job, roles: list[Role]) -> str:
+    rubrics_block = "\n".join(
+        f"- {role.value}: {ROLE_RUBRICS[role]}" for role in roles
+    )
     user_message = USER_TEMPLATE.format(
-        role=role.value,
-        role_rubric=ROLE_RUBRICS[role],
+        rubrics_block=rubrics_block,
         title=job.title,
         company=job.company,
         location=job.location,
         description=job.description[:MAX_DESCRIPTION_CHARS],
     )
-    response = await client.chat.completions.create(
-        model=settings.groq_model,
+    response = await chat_completion(
+        model=settings.groq_scoring_model,
         messages=[
             {
                 "role": "system",
@@ -114,52 +136,45 @@ async def _call_scoring_model(job: Job, role: Role) -> str:
             {"role": "user", "content": user_message},
         ],
         temperature=0,
-        max_tokens=60,
+        max_tokens=250,
     )
     return response.choices[0].message.content.strip()
-
-
-async def score_job(job: Job, role: Role) -> JobScore:
-    """Score one job against one role's rubric. Retries once on unparseable
-    output, then fails open (score=None) — a scoring hiccup must never kill
-    the run or silently hide a posting."""
-    for attempt in (1, 2):
-        raw = await _call_scoring_model(job, role)
-        parsed = _parse_score_response(raw)
-        if parsed is not None:
-            logger.info(
-                f"Scored {job.company} — {job.title}: role={role.value} "
-                f"score={parsed.score} reason={parsed.reason!r}"
-            )
-            return parsed
-        logger.warning(
-            f"Unparseable score output for {job.company} — {job.title} "
-            f"(attempt {attempt}): {raw!r}"
-        )
-
-    return JobScore(
-        score=None, reason="scoring unavailable (unparseable model output)"
-    )
 
 
 async def score_job_best_role(
     job: Job, roles: list[Role]
 ) -> tuple[Role, JobScore]:
-    """Score one job against every candidate role in parallel and return the
-    best (role, score) pair. A job only needs to fit ONE of the user's role
-    families to be worth surfacing; earlier roles in `roles` win ties (the
-    list is ordered by preference)."""
-    scores = await asyncio.gather(*(score_job(job, role) for role in roles))
+    """Score one job against every candidate role in a SINGLE batched call and
+    return the best (role, score) pair. A job only needs to fit ONE of the
+    user's role families to be worth surfacing; earlier roles in `roles` win
+    ties (the list is ordered by preference). Retries once on an unusable
+    payload, then fails open (score=None)."""
+    scores: dict[Role, JobScore] | None = None
+    for attempt in (1, 2):
+        raw = await _call_scoring_model(job, roles)
+        scores = _parse_batch_scores(raw, roles)
+        if scores is not None:
+            break
+        logger.warning(
+            f"Unparseable score output for {job.company} — {job.title} "
+            f"(attempt {attempt}): {raw!r}"
+        )
 
-    best_role, best_score = roles[0], scores[0]
-    for role, job_score in zip(roles[1:], scores[1:]):
-        best = -1 if best_score.score is None else best_score.score
-        current = -1 if job_score.score is None else job_score.score
+    if scores is None:
+        return roles[0], JobScore(
+            score=None, reason="scoring unavailable (unparseable model output)"
+        )
+
+    best_role = roles[0]
+    for role in roles:
+        best = -1 if scores[best_role].score is None else scores[best_role].score
+        current = -1 if scores[role].score is None else scores[role].score
         if current > best:
-            best_role, best_score = role, job_score
+            best_role = role
 
+    best_score = scores[best_role]
     logger.info(
-        f"Best role for {job.company} — {job.title}: {best_role.value} "
-        f"({best_score.score})"
+        f"Scored {job.company} — {job.title}: best={best_role.value} "
+        f"score={best_score.score} reason={best_score.reason!r}"
     )
     return best_role, best_score
