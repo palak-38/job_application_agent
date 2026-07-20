@@ -15,7 +15,7 @@ import re
 from pydantic import ValidationError
 
 from app.core.config import settings
-from app.integrations.groq_client import get_groq_client
+from app.integrations.groq_client import chat_completion
 from app.models.schemas import Job, ResumeDoc, ResumeEdits, ResumeEntry, ResumeSection
 
 logger = logging.getLogger(__name__)
@@ -97,15 +97,14 @@ def apply_edits(doc: ResumeDoc, edits: ResumeEdits) -> ResumeDoc:
 
 
 async def _call_tailoring_model(resume: ResumeDoc, job: Job) -> str:
-    client = get_groq_client()
     user_message = USER_TEMPLATE.format(
         title=job.title,
         company=job.company,
         description=job.description[:3000],
         resume_json=resume.model_dump_json(),
     )
-    response = await client.chat.completions.create(
-        model=settings.groq_model,
+    response = await chat_completion(
+        model=settings.groq_tailoring_model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},

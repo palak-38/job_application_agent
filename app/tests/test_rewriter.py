@@ -43,15 +43,15 @@ def make_doc() -> ResumeDoc:
     )
 
 
-def make_model_mock(*responses: str):
-    client = MagicMock()
+def mock_chat(*responses: str) -> AsyncMock:
+    """AsyncMock standing in for chat_completion, yielding one model response
+    per call."""
     side_effects = []
     for text in responses:
         response = MagicMock()
         response.choices[0].message.content = text
         side_effects.append(response)
-    client.chat.completions.create = AsyncMock(side_effect=side_effects)
-    return client
+    return AsyncMock(side_effect=side_effects)
 
 
 def test_apply_edits_rewrites_targeted_bullet_only():
@@ -117,9 +117,9 @@ async def test_tailor_applies_valid_model_edits():
         }
     )
     # Model output wrapped in markdown fences must still parse.
-    client = make_model_mock(f"```json\n{edits_json}\n```")
+    chat = mock_chat(f"```json\n{edits_json}\n```")
 
-    with patch("app.services.rewriter.get_groq_client", return_value=client):
+    with patch("app.services.rewriter.chat_completion", chat):
         result, ok = await tailor_resume(make_doc(), make_test_job())
 
     assert ok is True
@@ -128,16 +128,19 @@ async def test_tailor_applies_valid_model_edits():
         result.sections[1].entries[0].bullets[0]
         == "Built FastAPI services in Python"
     )
+    # Tailoring uses the quality (tailoring) model, not the scoring model.
+    from app.core.config import settings
+    assert chat.call_args.kwargs["model"] == settings.groq_tailoring_model
 
 
 @pytest.mark.asyncio
 async def test_tailor_fails_open_to_original_after_two_bad_outputs():
-    client = make_model_mock("not json at all", "still { not json")
+    chat = mock_chat("not json at all", "still { not json")
 
-    with patch("app.services.rewriter.get_groq_client", return_value=client):
+    with patch("app.services.rewriter.chat_completion", chat):
         doc = make_doc()
         result, ok = await tailor_resume(doc, make_test_job())
 
     assert ok is False
     assert result == doc  # original, untouched
-    assert client.chat.completions.create.await_count == 2
+    assert chat.await_count == 2

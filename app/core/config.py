@@ -36,11 +36,12 @@ class Settings(BaseSettings):
     # role families (wins scoring ties), and the tie-break anchor for
     # preference ordering.
     default_role: Role = Role.ML_AI_ENGINEER
-    # Groq model for scoring + rewriting. Swappable via env var without a
-    # deploy. Must be a slug the account can access: Kimi K2 is paid-only,
-    # so the free tier 404s on it — gpt-oss-120b is a core free-tier model
-    # and Groq's strongest free general/writing model.
-    groq_model: str = "openai/gpt-oss-120b"
+    # Two-tier models on SEPARATE per-model rate-limit budgets (Groq free
+    # tier = 8k tokens/min per model). Scoring is a cheap 0-10 classification
+    # → a small fast model; tailoring is the quality writer → the big model,
+    # and only runs on jobs that clear the gate. Both swappable via env var.
+    groq_scoring_model: str = "llama-3.1-8b-instant"
+    groq_tailoring_model: str = "openai/gpt-oss-120b"
     # Injected into the scoring prompt as a hard experience check: postings
     # demanding clearly more experience are capped low regardless of stack.
     candidate_experience: str = "fresher — 0-1 years of experience, one internship"
