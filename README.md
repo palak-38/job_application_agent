@@ -31,6 +31,10 @@ GitHub Actions cron (2×/day)              manual: POST /api/v1/run {role?, thre
 
 Layered: `routes → services → integrations → models`. One `Role` enum threads through all role-dependent behavior — search query, scoring rubric, and resume profile are all dicts keyed by the same value, so an unsupported role is a 422 at the API boundary, not a runtime surprise.
 
+<img width="1628" height="707" alt="image" src="https://github.com/user-attachments/assets/19c7e4f5-a0e2-4097-9fa3-512cfe324239" />
+
+**Emailed digest**
+
 ## Design decisions worth explaining
 
 - **Role-keyed everything, best-role matching.** I apply to three role families (ML/AI, data science, backend). A scheduled run fetches and scores against *all* of them and keeps a posting if it fits *any* — a backend-flavored ML job shouldn't die because it scored low on one rubric. Ties go to my preference order.
