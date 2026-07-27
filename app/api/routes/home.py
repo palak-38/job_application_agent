@@ -54,7 +54,7 @@ async def landing_page():
         <p>
             <a href='/docs'>Interactive API docs</a> ·
             <a href='/runs'>Run history (JSON)</a> ·
-            <a href='https://github.com/palak-38/job_application_agent'>Source on GitHub</a>
+            <a href='https://github.com/palak-38/job_digest'>Source on GitHub</a>
         </p>
         <h2 style='font-size:18px'>Recent runs</h2>
         {history}
